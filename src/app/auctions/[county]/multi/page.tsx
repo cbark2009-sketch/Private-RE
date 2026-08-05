@@ -4,7 +4,7 @@ import { getMultiDateListings, getActiveDatesInMonth } from "@/lib/getMultiDateL
 import { isValidISODate } from "@/lib/dates";
 import { getCounty } from "@/lib/counties";
 import { PRICE_BASIS_LABELS } from "@/lib/filterParams";
-import type { PriceFilterBasis } from "@/lib/getAuctionListings";
+import type { PriceFilterBasis, AuctionListingView } from "@/lib/getAuctionListings";
 import { ListingCard } from "@/components/ListingCard";
 import { PriceFilterForm } from "@/components/PriceFilterForm";
 
@@ -65,7 +65,7 @@ export default async function MultiDatePage({
     notFound();
   }
 
-  let listings;
+  let listings: AuctionListingView[];
   let error: string | null = null;
   try {
     listings = await getMultiDateListings(countySlug, dateList, zipFilter, priceFilter);

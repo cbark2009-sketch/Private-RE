@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getAuctionListings } from "@/lib/getAuctionListings";
+import { getAuctionListings, type AuctionListingView } from "@/lib/getAuctionListings";
 import { getCalendarMonth, getCalendarMonthForZip } from "@/lib/getCalendarMonth";
 import { isValidISODate } from "@/lib/dates";
 import { getCounty } from "@/lib/counties";
@@ -26,7 +26,7 @@ export default async function AuctionDatePage({
 
   const zipFilter = zip && /^\d{5}$/.test(zip) ? zip : undefined;
 
-  let listings;
+  let listings: AuctionListingView[];
   let error: string | null = null;
   try {
     listings = await getAuctionListings(countySlug, date, zipFilter);

@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { scrapeAuctionDate } from "@/lib/scrapeAuctions";
 import { estimateMaxBid, estimatePropertyValue } from "@/lib/valuation";
 import { getMarketEstimate } from "@/lib/getMarketEstimate";
+import { getPermitsForListing, type PermitResult } from "@/lib/permits";
 import { getCounty, type County } from "@/lib/counties";
 
 export interface AuctionListingView {
@@ -16,6 +17,7 @@ export interface AuctionListingView {
   parcelId: string | null;
   parcelUrl: string | null;
   valueEstimate: ReturnType<typeof estimatePropertyValue>;
+  permits: PermitResult | null;
 }
 
 export type PriceFilterBasis = "judgment" | "estimate" | "assessed";
@@ -74,10 +76,16 @@ export async function getAuctionListings(
 
   const views = await Promise.all(
     complete.map(async (row) => {
-      const market = await getMarketEstimate(row.propertyAddress!).catch((err) => {
-        console.error(`Market estimate failed for "${row.propertyAddress}":`, err);
-        return null;
-      });
+      const [market, permits] = await Promise.all([
+        getMarketEstimate(row.propertyAddress!).catch((err) => {
+          console.error(`Market estimate failed for "${row.propertyAddress}":`, err);
+          return null;
+        }),
+        getPermitsForListing(county.slug, row.parcelId).catch((err) => {
+          console.error(`Permit lookup failed for "${row.propertyAddress}" (parcel ${row.parcelId}):`, err);
+          return null;
+        }),
+      ]);
       return {
         caseNumber: row.caseNumber,
         caseDetailUrl: row.caseDetailUrl,
@@ -90,6 +98,7 @@ export async function getAuctionListings(
         parcelId: row.parcelId,
         parcelUrl: row.parcelUrl,
         valueEstimate: estimatePropertyValue({ assessedValue: row.assessedValueAtSale, market }),
+        permits,
       };
     })
   );

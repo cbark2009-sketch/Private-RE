@@ -53,6 +53,23 @@ model CalendarCache {
   @@id([countySlug, year, month])
 }
 
+// Cached building-permit lookups, keyed by (countySlug, parcelId) since each
+// jurisdiction's permit system is queried by parcel/folio number, not
+// address (see src/lib/permits/). Only a handful of counties have a known
+// public, non-CAPTCHA permit data source (src/lib/permits/index.ts's
+// registry) - most FL counties simply have no row here, ever, which is
+// expected coverage, not a bug. 24h TTL, same as Listing rows - permits
+// don't change fast, but these are free/unlimited government APIs (unlike
+// RentCast) so there's no quota reason to cache longer.
+model PermitCache {
+  countySlug String
+  parcelId   String
+  data       String // JSON-serialized Permit[]
+  fetchedAt  DateTime @default(now())
+
+  @@id([countySlug, parcelId])
+}
+
 // Cached RentCast /avm/value results, keyed by property address. The free
 // tier is 50 calls/month, so this cache is long-lived (30 days) - property
 // values don't move fast enough to justify spending calls re-checking often.

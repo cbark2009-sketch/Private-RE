@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@prisma/adapter-better-sqlite3": "^7.9.1",
+    "@prisma/adapter-libsql": "^7.9.1",
     "@prisma/client": "^7.9.1",
     "better-sqlite3": "^13.0.2",
     "cheerio": "^1.2.0",
@@ -19,6 +20,7 @@
     "react-dom": "19.2.4"
   },
   "devDependencies": {
+    "@libsql/client": "^0.17.4",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

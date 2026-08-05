@@ -123,7 +123,18 @@ function parseListings(retHTML: string): RawListing[] {
       return !type || type.includes("FORECLOSURE");
     })
     .map((chunk): RawListing => {
-      const caseMatch = chunk.match(/Case #:[\s\S]{0,80}?<a href="([^"]+)"[^>]*>([^<]+)<\/a>/);
+      // Most counties (e.g. Orange) hyperlink the case number itself to a
+      // case detail page. Some (e.g. Miami-Dade, which instead links the
+      // Parcel ID to its own property search) render the case number as
+      // plain text with no link at all. Try the linked form first since it
+      // also gives us caseDetailUrl; fall back to the same delimiter-agnostic
+      // plain-text extraction already used for address parsing below rather
+      // than falling through to "UNKNOWN" - a missing match here isn't just
+      // a blank field, it silently collides every listing on the same
+      // Prisma unique key (countySlug+caseNumber+auctionDate) and drops all
+      // but one via upsert.
+      const linkedCaseMatch = chunk.match(/Case #:[\s\S]{0,80}?<a href="([^"]+)"[^>]*>([^<]+)<\/a>/);
+      const plainCaseMatch = chunk.match(/Case #:[\s\S]{0,80}?AD_DTA">([^<@]+)/);
       const judgmentMatch = chunk.match(/Final Judgment Amount:[\s\S]{0,120}?(\$[\d,]+\.\d{2})/);
       const parcelMatch = chunk.match(/Parcel ID:[\s\S]{0,200}?<a href="([^"]*)"[^>]*>([^<]+)<\/a>/);
       const assessedMatch = chunk.match(/Assessed Value:[\s\S]{0,120}?(\$[\d,]+\.\d{2})/);
@@ -148,8 +159,8 @@ function parseListings(retHTML: string): RawListing[] {
       const zipCode = addressMatch?.[2]?.match(/\d{5}/)?.[0] ?? null;
 
       return {
-        caseNumber: caseMatch?.[2]?.trim() ?? "UNKNOWN",
-        caseDetailUrl: caseMatch?.[1] ?? null,
+        caseNumber: (linkedCaseMatch?.[2] ?? plainCaseMatch?.[1])?.trim() ?? "UNKNOWN",
+        caseDetailUrl: linkedCaseMatch?.[1] ?? null,
         finalJudgmentAmount: parseMoney(judgmentMatch?.[1]),
         parcelId,
         parcelUrl: parcelId ? parcelMatch?.[1] ?? null : null,

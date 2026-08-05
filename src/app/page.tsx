@@ -24,8 +24,12 @@ export default function HomePage() {
 
   return (
     <div>
-      <section className="bg-navy py-16 text-white sm:py-24">
-        <div className="mx-auto max-w-2xl px-4 text-center sm:px-6">
+      <section className="relative overflow-hidden bg-gradient-to-br from-navy via-navy to-navy-light py-16 text-white sm:py-24">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -top-32 left-1/2 h-96 w-[36rem] -translate-x-1/2 rounded-full bg-accent/25 blur-3xl"
+        />
+        <div className="relative mx-auto max-w-2xl px-4 text-center sm:px-6">
           <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">Auction Clarity</h1>
           <p className="mt-4 text-lg text-white/70">
             Florida foreclosure auctions, translated into plain English - with a real value

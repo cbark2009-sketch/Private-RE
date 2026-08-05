@@ -31,7 +31,7 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
-        <header className="border-b border-border bg-navy text-white">
+        <header className="border-b border-border bg-gradient-to-r from-navy to-navy-light text-white">
           <div className="mx-auto max-w-6xl px-4 py-4 sm:px-6 flex flex-wrap items-center justify-between gap-4">
             <a href="/" className="flex items-baseline gap-2">
               <span className="text-lg font-semibold tracking-tight">

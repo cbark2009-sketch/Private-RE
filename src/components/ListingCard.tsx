@@ -1,6 +1,7 @@
 import { AuctionListingView } from "@/lib/getAuctionListings";
 import { formatMoney } from "@/lib/format";
 import { formatShortDate } from "@/lib/dates";
+import { PermitsSection } from "@/components/PermitsSection";
 
 function EstimateBadge() {
   return (
@@ -53,7 +54,7 @@ export function ListingCard({
   const hasAddress = Boolean(listing.propertyAddress);
 
   return (
-    <article className="flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-sm">
+    <article className="flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-lg hover:shadow-accent/10">
       <div className="relative aspect-[16/9] w-full bg-border">
         {showDate ? (
           <span className="absolute left-2 top-2 z-10 rounded-full bg-navy/90 px-2 py-1 text-[11px] font-semibold text-white shadow">
@@ -125,6 +126,8 @@ export function ListingCard({
             ) : null}
           </div>
         ) : null}
+
+        <PermitsSection permits={listing.permits} />
 
         <div className="mt-auto flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-3 text-xs">
           {listing.caseDetailUrl ? (
