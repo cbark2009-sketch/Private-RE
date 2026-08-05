@@ -1,0 +1,69 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// One row per case appearing on a specific auction date in a specific
+// county. The same case can appear more than once over time if a sale gets
+// rescheduled, so the unique key is (countySlug, caseNumber, auctionDate),
+// not caseNumber alone - and countySlug is included because RealForeclose is
+// a shared platform across many counties (see src/lib/counties.ts), so case
+// number formats aren't even guaranteed unique across counties on their own.
+//
+// Note: we deliberately do NOT store data scraped from any county's Property
+// Appraiser site - Orange's (ocpaweb.ocpafl.org) runs an active anti-bot
+// firewall that explicitly blocks automated access, and we treat that as the
+// default assumption for other counties' appraiser sites too rather than
+// verify each one - `parcelUrl` is a link out for a human to check manually.
+model Listing {
+  id                   String   @id @default(cuid())
+  countySlug           String
+  auctionDate          DateTime
+  caseNumber           String
+  caseDetailUrl        String?
+  finalJudgmentAmount  Float?
+  estimatedMaxBid      Float?
+  propertyAddress      String?
+  zipCode              String?
+  assessedValueAtSale  Float?
+  parcelId             String?
+  parcelUrl            String?
+  scrapedAt            DateTime @default(now())
+
+  @@unique([countySlug, caseNumber, auctionDate])
+  @@index([countySlug, auctionDate])
+  @@index([zipCode])
+}
+
+// Cached month-calendar day counts (src/lib/scrapeCalendar.ts), one row per
+// (county, year, month). Short-lived cache (a few hours) since the "active"
+// count for TODAY specifically decreases throughout the day as auctions
+// resolve - unlike Listing/ValueEstimateCache this can't be cached for days.
+model CalendarCache {
+  countySlug String
+  year       Int
+  month      Int
+  data       String // JSON-serialized DayCount[]
+  fetchedAt  DateTime @default(now())
+
+  @@id([countySlug, year, month])
+}
+
+// Cached RentCast /avm/value results, keyed by property address. The free
+// tier is 50 calls/month, so this cache is long-lived (30 days) - property
+// values don't move fast enough to justify spending calls re-checking often.
+model ValueEstimateCache {
+  address             String   @id
+  price               Float?
+  priceRangeLow       Float?
+  priceRangeHigh      Float?
+  squareFootage       Float?
+  compAvgPricePerSqft Float?
+  compCount           Int?
+  failed              Boolean  @default(false)
+  fetchedAt           DateTime @default(now())
+}
