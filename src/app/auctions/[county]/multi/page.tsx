@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getMultiDateListings, getActiveDatesInMonth } from "@/lib/getMultiDateListings";
+import { getMultiDateListings, getActiveDatesAcrossMonths } from "@/lib/getMultiDateListings";
 import { getCalendarMonth, getCalendarMonthForZip } from "@/lib/getCalendarMonth";
 import { isValidISODate } from "@/lib/dates";
 import { getCounty } from "@/lib/counties";
@@ -21,15 +21,13 @@ export default async function MultiDatePage({
   params: Promise<{ county: string }>;
   searchParams: Promise<{
     dates?: string;
-    month?: string;
-    year?: string;
     zip?: string;
     priceBasis?: string;
     minPrice?: string;
   }>;
 }) {
   const { county: countySlug } = await params;
-  const { dates, month, year, zip, priceBasis, minPrice } = await searchParams;
+  const { dates, zip, priceBasis, minPrice } = await searchParams;
 
   const county = getCounty(countySlug);
   if (!county) notFound();
@@ -43,28 +41,27 @@ export default async function MultiDatePage({
       ? { basis: priceBasisValid, min: minPriceNum }
       : undefined;
 
-  // Scope is either an explicit date list (calendar multi-select) or "every
-  // active date in this month" (price-filter "search all dates" path).
+  // Scope is either an explicit date list (calendar multi-select) or
+  // "everything currently posted" (the price-filter path) - the latter
+  // deliberately ignores whatever month/day happened to be in view when the
+  // filter was submitted, scanning forward from today instead, so applying
+  // a filter never silently misses listings just because of which page you
+  // applied it from.
   let dateList: string[];
   let scopeLabel: string;
-  const y = year ? Number(year) : NaN;
-  const m = month ? Number(month) : NaN;
 
   if (dates) {
     dateList = dates.split(",").filter(isValidISODate);
     scopeLabel = `${dateList.length} selected day${dateList.length === 1 ? "" : "s"}`;
-  } else if (Number.isInteger(y) && Number.isInteger(m) && m >= 1 && m <= 12) {
-    dateList = await getActiveDatesInMonth(countySlug, y, m).catch((err) => {
-      console.error(`Failed to resolve active dates for ${countySlug} ${y}-${m}:`, err);
-      return [];
-    });
-    scopeLabel = new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", {
-      month: "long",
-      year: "numeric",
-      timeZone: "UTC",
-    });
   } else {
-    notFound();
+    const today = new Date();
+    dateList = await getActiveDatesAcrossMonths(countySlug, today.getUTCFullYear(), today.getUTCMonth() + 1).catch(
+      (err) => {
+        console.error(`Failed to resolve active dates for ${countySlug}:`, err);
+        return [];
+      }
+    );
+    scopeLabel = "every upcoming date";
   }
 
   let listings: AuctionListingView[];
@@ -80,12 +77,10 @@ export default async function MultiDatePage({
   const firstDate = dateList[0] ?? new Date().toISOString().slice(0, 10);
   const backHref = `/auctions/${county.slug}/${firstDate}`;
 
-  // The calendar shown here needs a month to open on - if we got here via an
-  // explicit day selection, show that selection's month; if we got here via
-  // "search this whole month," show that month directly.
-  const [calYear, calMonth] = Number.isInteger(y) && Number.isInteger(m)
-    ? [y, m]
-    : firstDate.split("-").map(Number);
+  // The calendar shown here needs a month to open on - the month of the
+  // earliest matching date is a reasonable default either way (an explicit
+  // selection's first day, or the first upcoming active date found).
+  const [calYear, calMonth] = firstDate.split("-").map(Number);
   const calendarDays = await (zipFilter
     ? getCalendarMonthForZip(countySlug, calYear, calMonth, zipFilter)
     : getCalendarMonth(countySlug, calYear, calMonth)
@@ -125,7 +120,7 @@ export default async function MultiDatePage({
       <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
         <PriceFilterForm
           action={`/auctions/${county.slug}/multi`}
-          hiddenParams={{ dates: dates ?? undefined, month, year, zip: zipFilter }}
+          hiddenParams={{ dates: dates ?? undefined, zip: zipFilter }}
           zip={zipFilter}
           priceBasis={priceFilter?.basis}
           minPrice={priceFilter?.min}

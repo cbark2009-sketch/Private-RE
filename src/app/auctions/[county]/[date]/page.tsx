@@ -64,12 +64,11 @@ export default async function AuctionDatePage({
           </div>
         ) : null}
 
-        {/* Price filtering searches every active date in this month at once (not just
-            today) - see /multi. Submitting here jumps you there with this month
-            pre-selected. */}
+        {/* Price filtering searches every upcoming active date for this county at
+            once (not just today, and not just this month) - see /multi. */}
         <PriceFilterForm
           action={`/auctions/${county.slug}/multi`}
-          hiddenParams={{ month: String(month), year: String(year), zip: zipFilter }}
+          hiddenParams={{ zip: zipFilter }}
         />
 
         {error ? (
