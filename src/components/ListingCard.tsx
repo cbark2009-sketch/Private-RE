@@ -2,6 +2,7 @@ import { AuctionListingView } from "@/lib/getAuctionListings";
 import { formatMoney } from "@/lib/format";
 import { formatShortDate } from "@/lib/dates";
 import { PermitsSection } from "@/components/PermitsSection";
+import { buildZillowUrl } from "@/lib/zillow";
 
 function EstimateBadge() {
   return (
@@ -45,20 +46,27 @@ function Stat({
 export function ListingCard({
   listing,
   showDate = false,
+  countyName,
 }: {
   listing: AuctionListingView;
   /** Show which auction date this card is from - turn on for combined multi-date views. */
   showDate?: boolean;
+  /** Show which county this card is from - for cross-county views like the homepage's good-deals section. */
+  countyName?: string;
 }) {
   const mapQuery = encodeURIComponent(listing.propertyAddress ?? "");
+  const zillowUrl = listing.propertyAddress ? buildZillowUrl(listing.propertyAddress) : null;
   const hasAddress = Boolean(listing.propertyAddress);
+  const badge = [countyName, showDate ? formatShortDate(listing.auctionDate) : null]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <article className="flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-lg hover:shadow-accent/10">
       <div className="relative aspect-[16/9] w-full bg-border">
-        {showDate ? (
+        {badge ? (
           <span className="absolute left-2 top-2 z-10 rounded-full bg-navy/90 px-2 py-1 text-[11px] font-semibold text-white shadow">
-            {formatShortDate(listing.auctionDate)}
+            {badge}
           </span>
         ) : null}
         {hasAddress ? (
@@ -148,6 +156,16 @@ export function ListingCard({
               className="font-medium text-accent hover:underline"
             >
               View property appraiser ↗
+            </a>
+          ) : null}
+          {zillowUrl ? (
+            <a
+              href={zillowUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-accent hover:underline"
+            >
+              Compare on Zillow ↗
             </a>
           ) : null}
         </div>

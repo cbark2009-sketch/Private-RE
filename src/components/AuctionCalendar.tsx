@@ -29,6 +29,7 @@ export function AuctionCalendar({
   initialYear,
   initialMonth,
   initialDays,
+  initialPicked,
 }: {
   county: County;
   selectedDate: string;
@@ -38,13 +39,15 @@ export function AuctionCalendar({
   initialYear: number;
   initialMonth: number;
   initialDays: DayCount[];
+  /** Days already selected when this calendar mounts (e.g. landing on /multi with ?dates=... already set) - lets you keep adjusting a selection instead of starting over. */
+  initialPicked?: string[];
 }) {
   const [open, setOpen] = useState(false);
   const [year, setYear] = useState(initialYear);
   const [month, setMonth] = useState(initialMonth);
   const [days, setDays] = useState<DayCount[]>(initialDays);
   const [loading, setLoading] = useState(false);
-  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [picked, setPicked] = useState<Set<string>>(() => new Set(initialPicked));
   const cache = useRef(new Map<string, DayCount[]>([[`${initialYear}-${initialMonth}-${zip ?? ""}`, initialDays]]));
   const containerRef = useRef<HTMLDivElement>(null);
 

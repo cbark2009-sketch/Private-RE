@@ -46,6 +46,54 @@ function parseMoney(text: string | undefined | null): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
+const ORDINAL_SUFFIXES = ["ST", "ND", "RD", "TH"];
+
+function correctOrdinalSuffix(n: number): string {
+  const lastTwo = n % 100;
+  if (lastTwo >= 11 && lastTwo <= 13) return "TH";
+  switch (n % 10) {
+    case 1: return "ST";
+    case 2: return "ND";
+    case 3: return "RD";
+    default: return "TH";
+  }
+}
+
+/**
+ * Some counties' sites (confirmed on Indian River) render the street-address
+ * line with no space between the house number and street name at all -
+ * "64WOODLAND DR" instead of "64 WOODLAND DR". This breaks map links (sends
+ * you to the wrong place or nowhere). Simple digit/letter-boundary insertion
+ * isn't safe on its own because ordinal street names ("8TH ST", "42ND AVE")
+ * are themselves numeric, so "79008TH ST" is ambiguous between "7900 8TH ST"
+ * and "79008 TH ST" from the digits alone. Disambiguate using the fact that
+ * an ordinal's suffix (ST/ND/RD/TH) is fully determined by its own last
+ * digit(s) - try treating just the last 1-2 digits as the street's ordinal
+ * number, and take the shortest split whose suffix matches what's actually
+ * in the text (favors a longer house number, which matched every real
+ * example found). Falls through to a plain space-insertion for non-ordinal
+ * street names ("64WOODLAND DR"), and is a no-op for anything already
+ * space-separated (the overwhelming majority of counties).
+ */
+function insertMissingHouseNumberSpace(line: string): string {
+  const match = line.match(/^(\d+)([A-Za-z].*)$/);
+  if (!match) return line;
+  const [, digits, rest] = match;
+
+  const suffix = rest.match(/^([A-Za-z]{2})\b/)?.[1]?.toUpperCase();
+  if (suffix && ORDINAL_SUFFIXES.includes(suffix)) {
+    for (const digitCount of [1, 2]) {
+      if (digits.length <= digitCount) break;
+      const ordinalDigits = digits.slice(-digitCount);
+      if (correctOrdinalSuffix(Number(ordinalDigits)) === suffix) {
+        return `${digits.slice(0, -digitCount)} ${ordinalDigits}${rest}`;
+      }
+    }
+  }
+
+  return `${digits} ${rest}`;
+}
+
 const MAX_PAGES = 10; // safety valve (~100 listings) in case the duplicate-page termination ever misbehaves
 
 /** Fetches and concatenates every page's `retHTML` for a given county host and auction date (MM/DD/YYYY). */
@@ -146,6 +194,7 @@ function parseListings(retHTML: string): RawListing[] {
       const addressMatch = chunk.match(
         /Property Address:[\s\S]{0,80}?AD_DTA">([^<@]+)[\s\S]{0,80}?AD_DTA">([^<@]+)/
       );
+      const streetLine = addressMatch ? insertMissingHouseNumberSpace(addressMatch[1].trim()) : null;
       const maxBidMatch = chunk.match(/Plaintiff Max Bid:[\s\S]{0,120}?(\$[\d,]+\.\d{2})/);
 
       const parcelText = parcelMatch?.[2]?.trim() ?? null;
@@ -164,7 +213,7 @@ function parseListings(retHTML: string): RawListing[] {
         finalJudgmentAmount: parseMoney(judgmentMatch?.[1]),
         parcelId,
         parcelUrl: parcelId ? parcelMatch?.[1] ?? null : null,
-        propertyAddress: addressMatch ? `${addressMatch[1].trim()}, ${addressMatch[2].trim()}` : null,
+        propertyAddress: addressMatch ? `${streetLine}, ${addressMatch[2].trim()}` : null,
         zipCode,
         assessedValue: parseMoney(assessedMatch?.[1]),
         plaintiffMaxBid: parseMoney(maxBidMatch?.[1]),

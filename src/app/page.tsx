@@ -2,6 +2,15 @@ import Link from "next/link";
 import { COUNTIES } from "@/lib/counties";
 import { toISODate } from "@/lib/dates";
 import { ZipSearchBar } from "@/components/ZipSearchBar";
+import { ListingCard } from "@/components/ListingCard";
+import { getGoodDeals } from "@/lib/getGoodDeals";
+
+// Without this, Next.js prerenders the homepage once at build time and
+// serves that same static HTML to everyone - the good-deals section would
+// freeze at whatever was true the moment of the last deploy instead of
+// reflecting newly-scraped/estimated listings. Same pattern already used on
+// the other data-driven pages (see [county]/[date] and [county]/multi).
+export const dynamic = "force-dynamic";
 
 const FEATURES = [
   {
@@ -18,9 +27,13 @@ const FEATURES = [
   },
 ];
 
-export default function HomePage() {
+export default async function HomePage() {
   const today = toISODate(new Date());
   const sortedCounties = [...COUNTIES].sort((a, b) => a.name.localeCompare(b.name));
+  const goodDeals = await getGoodDeals().catch((err) => {
+    console.error("Failed to load good deals:", err);
+    return [];
+  });
 
   return (
     <div>
@@ -52,6 +65,29 @@ export default function HomePage() {
           ))}
         </div>
       </section>
+
+      {goodDeals.length > 0 ? (
+        <section className="mx-auto max-w-5xl px-4 pb-4 sm:px-6">
+          <h2 className="text-lg font-semibold text-foreground">Possibly good deals</h2>
+          <p className="mt-1 max-w-3xl text-sm text-muted">
+            Upcoming listings whose estimated value comes in well above the judgment amount -
+            across every county browsed so far. This is a starting filter, not a recommendation:
+            a low judgment can also mean this is a junior lien (an HOA foreclosure, most often) -
+            winning the auction clears <em>that</em> debt, not necessarily any mortgage still on
+            the property. Always check the case record for the full lien picture before bidding.
+          </p>
+          <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {goodDeals.map((deal) => (
+              <ListingCard
+                key={`${deal.countySlug}-${deal.caseNumber}`}
+                listing={deal}
+                showDate
+                countyName={deal.countyName}
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="mx-auto max-w-5xl px-4 pb-16 sm:px-6">
         <h2 className="text-lg font-semibold text-foreground">

@@ -1,12 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getMultiDateListings, getActiveDatesInMonth } from "@/lib/getMultiDateListings";
+import { getCalendarMonth, getCalendarMonthForZip } from "@/lib/getCalendarMonth";
 import { isValidISODate } from "@/lib/dates";
 import { getCounty } from "@/lib/counties";
 import { PRICE_BASIS_LABELS } from "@/lib/filterParams";
 import type { PriceFilterBasis, AuctionListingView } from "@/lib/getAuctionListings";
 import { ListingCard } from "@/components/ListingCard";
 import { PriceFilterForm } from "@/components/PriceFilterForm";
+import { AuctionCalendar } from "@/components/AuctionCalendar";
 
 export const dynamic = "force-dynamic";
 
@@ -75,17 +77,45 @@ export default async function MultiDatePage({
     error = "Something went wrong loading these dates. Check the server logs for details.";
   }
 
-  const backHref = `/auctions/${county.slug}/${dateList[0] ?? new Date().toISOString().slice(0, 10)}`;
+  const firstDate = dateList[0] ?? new Date().toISOString().slice(0, 10);
+  const backHref = `/auctions/${county.slug}/${firstDate}`;
+
+  // The calendar shown here needs a month to open on - if we got here via an
+  // explicit day selection, show that selection's month; if we got here via
+  // "search this whole month," show that month directly.
+  const [calYear, calMonth] = Number.isInteger(y) && Number.isInteger(m)
+    ? [y, m]
+    : firstDate.split("-").map(Number);
+  const calendarDays = await (zipFilter
+    ? getCalendarMonthForZip(countySlug, calYear, calMonth, zipFilter)
+    : getCalendarMonth(countySlug, calYear, calMonth)
+  ).catch((err) => {
+    console.error(`Calendar fetch failed for ${countySlug} ${calYear}-${calMonth} (zip=${zipFilter}):`, err);
+    return [];
+  });
 
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-surface px-4 py-4 sm:px-6">
-        <Link
-          href={backHref}
-          className="rounded-md border border-border px-3 py-1.5 text-sm text-muted hover:bg-background"
-        >
-          ← Back to day view
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href={backHref}
+            className="rounded-md border border-border px-3 py-1.5 text-sm text-muted hover:bg-background"
+          >
+            ← Back to day view
+          </Link>
+          <AuctionCalendar
+            county={county}
+            selectedDate={firstDate}
+            zip={zipFilter}
+            priceBasis={priceFilter?.basis}
+            minPrice={priceFilter?.min}
+            initialYear={calYear}
+            initialMonth={calMonth}
+            initialDays={calendarDays}
+            initialPicked={dates ? dateList : []}
+          />
+        </div>
         <h1 className="text-lg font-semibold text-foreground">
           {county.name} County · Across {scopeLabel}
           {zipFilter ? ` · ${zipFilter}` : ""}
