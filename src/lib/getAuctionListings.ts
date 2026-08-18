@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { scrapeAuctionDate } from "@/lib/scrapeAuctions";
 import { estimateMaxBid, estimatePropertyValue } from "@/lib/valuation";
-import { getMarketEstimate } from "@/lib/getMarketEstimate";
+import { getMarketEstimate, getCachedMarketEstimate } from "@/lib/getMarketEstimate";
 import { getPermitsForListing, type PermitResult } from "@/lib/permits";
 import { getCounty, type County } from "@/lib/counties";
 
@@ -20,17 +20,39 @@ export interface AuctionListingView {
   permits: PermitResult | null;
 }
 
-export type PriceFilterBasis = "judgment" | "estimate" | "assessed";
-
-export interface PriceFilter {
-  basis: PriceFilterBasis;
-  min: number;
+export interface RangeFilter {
+  min?: number;
+  max?: number;
 }
 
-function priceFieldFor(view: Pick<AuctionListingView, "finalJudgmentAmount" | "assessedValue" | "valueEstimate">, basis: PriceFilterBasis): number | null {
-  if (basis === "judgment") return view.finalJudgmentAmount;
-  if (basis === "assessed") return view.assessedValue;
-  return view.valueEstimate.amount;
+export interface ListingFilters {
+  judgment?: RangeFilter;
+  maxBid?: RangeFilter;
+  estimate?: RangeFilter;
+  assessed?: RangeFilter;
+  /** Only listings where valueEstimate.amount / finalJudgmentAmount is at least this - a user-adjustable version of the ratio the homepage's good-deals section uses. */
+  minSpreadRatio?: number;
+}
+
+function inRange(value: number | null, range: RangeFilter | undefined): boolean {
+  if (!range || (range.min == null && range.max == null)) return true; // no constraint on this field
+  if (value == null) return false; // constraint set but this listing has no data for it - exclude, don't guess
+  if (range.min != null && value < range.min) return false;
+  if (range.max != null && value > range.max) return false;
+  return true;
+}
+
+/** A listing must satisfy every field the caller actually set (AND across fields) - unset fields impose no constraint. */
+function matchesFilters(view: AuctionListingView, filters: ListingFilters): boolean {
+  if (!inRange(view.finalJudgmentAmount, filters.judgment)) return false;
+  if (!inRange(view.estimatedMaxBid, filters.maxBid)) return false;
+  if (!inRange(view.valueEstimate.amount, filters.estimate)) return false;
+  if (!inRange(view.assessedValue, filters.assessed)) return false;
+  if (filters.minSpreadRatio != null) {
+    if (view.valueEstimate.amount == null || !view.finalJudgmentAmount) return false;
+    if (view.valueEstimate.amount / view.finalJudgmentAmount < filters.minSpreadRatio) return false;
+  }
+  return true;
 }
 
 /**
@@ -39,20 +61,33 @@ function priceFieldFor(view: Pick<AuctionListingView, "finalJudgmentAmount" | "a
  * data. Pass `zipFilter` to narrow to just that zip within the county
  * (a county's auctions can span many zips - this is what makes a zip search
  * actually show that zip's properties instead of the whole county's).
- * Pass `priceFilter` to only include listings whose judgment/estimate/
- * assessed value (whichever `basis` picks) is at least `min` - a listing
- * with no value for the chosen basis (e.g. no RentCast estimate) is excluded
- * rather than guessed at. Throws if countySlug isn't one of our supported
- * counties.
+ * Pass `filters` to apply any combination of judgment/max-bid/estimate/
+ * assessed ranges and a minimum estimate-vs-judgment spread ratio at once -
+ * a listing missing data for any field that's actually constrained is
+ * excluded rather than guessed at. Throws if countySlug isn't one of our
+ * supported counties.
+ *
+ * `options.liveEstimates` (default true) controls whether a never-before-seen
+ * address gets a real RentCast lookup or just whatever's already cached
+ * (same as `false` here). Set `false` for searches that touch many
+ * addresses at once (cross-county search) - a live RentCast round-trip per
+ * new address is genuinely slow at that scale (a 2-county live search took
+ * long enough to need killing before this existed), not just a quota
+ * concern. `options.skipPermits` (default false) similarly skips the
+ * permit-source lookups for the same kind of broad/bulk search, matching
+ * the homepage good-deals section's existing approach.
  */
 export async function getAuctionListings(
   countySlug: string,
   auctionDate: string,
   zipFilter?: string,
-  priceFilter?: PriceFilter
+  filters?: ListingFilters,
+  options?: { liveEstimates?: boolean; skipPermits?: boolean }
 ): Promise<AuctionListingView[]> {
   const county = getCounty(countySlug);
   if (!county) throw new Error(`Unsupported county: ${countySlug}`);
+  const liveEstimates = options?.liveEstimates ?? true;
+  const skipPermits = options?.skipPermits ?? false;
 
   const rows = await getOrRefreshRows(county, auctionDate);
 
@@ -77,14 +112,18 @@ export async function getAuctionListings(
   const views = await Promise.all(
     complete.map(async (row) => {
       const [market, permits] = await Promise.all([
-        getMarketEstimate(row.propertyAddress!).catch((err) => {
-          console.error(`Market estimate failed for "${row.propertyAddress}":`, err);
-          return null;
-        }),
-        getPermitsForListing(county.slug, row.parcelId).catch((err) => {
-          console.error(`Permit lookup failed for "${row.propertyAddress}" (parcel ${row.parcelId}):`, err);
-          return null;
-        }),
+        (liveEstimates ? getMarketEstimate(row.propertyAddress!) : getCachedMarketEstimate(row.propertyAddress!)).catch(
+          (err) => {
+            console.error(`Market estimate failed for "${row.propertyAddress}":`, err);
+            return null;
+          }
+        ),
+        skipPermits
+          ? Promise.resolve(null)
+          : getPermitsForListing(county.slug, row.parcelId).catch((err) => {
+              console.error(`Permit lookup failed for "${row.propertyAddress}" (parcel ${row.parcelId}):`, err);
+              return null;
+            }),
       ]);
       return {
         caseNumber: row.caseNumber,
@@ -103,11 +142,8 @@ export async function getAuctionListings(
     })
   );
 
-  if (!priceFilter) return views;
-  return views.filter((v) => {
-    const value = priceFieldFor(v, priceFilter.basis);
-    return value != null && value >= priceFilter.min;
-  });
+  if (!filters) return views;
+  return views.filter((v) => matchesFilters(v, filters));
 }
 
 /**

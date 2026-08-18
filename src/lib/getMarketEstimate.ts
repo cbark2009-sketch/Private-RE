@@ -41,6 +41,23 @@ export async function getMarketEstimate(address: string): Promise<MarketEstimate
   return result;
 }
 
+/**
+ * Same as getMarketEstimate, but never makes a live RentCast call - only
+ * ever reads whatever's already cached (regardless of the normal 30-day
+ * freshness window, since "possibly a bit stale" still beats "no data" for
+ * this use case). Exists for searches that touch many addresses at once
+ * (cross-county search, the homepage's good-deals list) where waiting on a
+ * live RentCast round-trip per never-before-seen address is what actually
+ * makes those searches slow - a 2-county live search took long enough to
+ * need killing before this existed. Judgment/Assessed/Max-Bid data is
+ * unaffected either way since those never depended on RentCast.
+ */
+export async function getCachedMarketEstimate(address: string): Promise<MarketEstimate | null> {
+  const cached = await prisma.valueEstimateCache.findUnique({ where: { address } });
+  if (!cached || cached.failed) return null;
+  return toMarketEstimate(cached);
+}
+
 function toMarketEstimate(cached: {
   price: number | null;
   priceRangeLow: number | null;

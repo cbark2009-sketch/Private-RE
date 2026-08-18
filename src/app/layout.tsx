@@ -51,6 +51,12 @@ export default function RootLayout({
                 <span>search a zip</span>
                 <ZipSearchBar />
               </div>
+              <a
+                href="/auctions/search"
+                className="rounded-md border border-white/20 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/10"
+              >
+                🔍 Search multiple counties
+              </a>
             </div>
           </div>
         </header>

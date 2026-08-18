@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { County } from "@/lib/counties";
 import type { DayCount } from "@/lib/scrapeCalendar";
-import type { PriceFilterBasis } from "@/lib/getAuctionListings";
+import type { ListingFilters } from "@/lib/getAuctionListings";
 import { buildFilterQueryString } from "@/lib/filterParams";
 
 const MONTH_NAMES = [
@@ -24,8 +24,7 @@ export function AuctionCalendar({
   county,
   selectedDate,
   zip,
-  priceBasis,
-  minPrice,
+  filters,
   initialYear,
   initialMonth,
   initialDays,
@@ -34,8 +33,7 @@ export function AuctionCalendar({
   county: County;
   selectedDate: string;
   zip?: string;
-  priceBasis?: PriceFilterBasis;
-  minPrice?: number;
+  filters?: ListingFilters;
   initialYear: number;
   initialMonth: number;
   initialDays: DayCount[];
@@ -95,12 +93,10 @@ export function AuctionCalendar({
   const byDate = new Map(days.map((d) => [d.date, d]));
   const leadingBlanks = firstWeekday(year, month);
   const totalDays = daysInMonth(year, month);
-  const filterQs = buildFilterQueryString({ zip, priceBasis, minPrice });
+  const filterQs = buildFilterQueryString({ zip, filters });
   const pickedList = [...picked].sort();
   const multiHref =
-    `/auctions/${county.slug}/multi?dates=${pickedList.join(",")}` +
-    (zip ? `&zip=${zip}` : "") +
-    (priceBasis && minPrice != null ? `&priceBasis=${priceBasis}&minPrice=${minPrice}` : "");
+    `/auctions/${county.slug}/multi?dates=${pickedList.join(",")}` + (filterQs ? `&${filterQs.slice(1)}` : "");
 
   return (
     <div className="relative" ref={containerRef}>

@@ -4,45 +4,33 @@ import { getMultiDateListings, getActiveDatesAcrossMonths } from "@/lib/getMulti
 import { getCalendarMonth, getCalendarMonthForZip } from "@/lib/getCalendarMonth";
 import { isValidISODate } from "@/lib/dates";
 import { getCounty } from "@/lib/counties";
-import { PRICE_BASIS_LABELS } from "@/lib/filterParams";
-import type { PriceFilterBasis, AuctionListingView } from "@/lib/getAuctionListings";
+import { parseListingFilters, type FilterSearchParams } from "@/lib/filterParams";
+import type { AuctionListingView } from "@/lib/getAuctionListings";
 import { ListingCard } from "@/components/ListingCard";
-import { PriceFilterForm } from "@/components/PriceFilterForm";
+import { FiltersPanel } from "@/components/FiltersPanel";
 import { AuctionCalendar } from "@/components/AuctionCalendar";
 
 export const dynamic = "force-dynamic";
-
-const PRICE_BASES = new Set(Object.keys(PRICE_BASIS_LABELS));
 
 export default async function MultiDatePage({
   params,
   searchParams,
 }: {
   params: Promise<{ county: string }>;
-  searchParams: Promise<{
-    dates?: string;
-    zip?: string;
-    priceBasis?: string;
-    minPrice?: string;
-  }>;
+  searchParams: Promise<{ dates?: string; zip?: string } & FilterSearchParams>;
 }) {
   const { county: countySlug } = await params;
-  const { dates, zip, priceBasis, minPrice } = await searchParams;
+  const searchParamsResolved = await searchParams;
+  const { dates, zip } = searchParamsResolved;
 
   const county = getCounty(countySlug);
   if (!county) notFound();
 
   const zipFilter = zip && /^\d{5}$/.test(zip) ? zip : undefined;
-  const minPriceNum = minPrice ? Number(minPrice) : NaN;
-  const priceBasisValid =
-    priceBasis && PRICE_BASES.has(priceBasis) ? (priceBasis as PriceFilterBasis) : undefined;
-  const priceFilter =
-    priceBasisValid && Number.isFinite(minPriceNum) && minPriceNum > 0
-      ? { basis: priceBasisValid, min: minPriceNum }
-      : undefined;
+  const filters = parseListingFilters(searchParamsResolved);
 
   // Scope is either an explicit date list (calendar multi-select) or
-  // "everything currently posted" (the price-filter path) - the latter
+  // "everything currently posted" (the filter-panel path) - the latter
   // deliberately ignores whatever month/day happened to be in view when the
   // filter was submitted, scanning forward from today instead, so applying
   // a filter never silently misses listings just because of which page you
@@ -67,7 +55,7 @@ export default async function MultiDatePage({
   let listings: AuctionListingView[];
   let error: string | null = null;
   try {
-    listings = await getMultiDateListings(countySlug, dateList, zipFilter, priceFilter);
+    listings = await getMultiDateListings(countySlug, dateList, zipFilter, filters);
   } catch (err) {
     console.error(err);
     listings = [];
@@ -103,8 +91,7 @@ export default async function MultiDatePage({
             county={county}
             selectedDate={firstDate}
             zip={zipFilter}
-            priceBasis={priceFilter?.basis}
-            minPrice={priceFilter?.min}
+            filters={filters}
             initialYear={calYear}
             initialMonth={calMonth}
             initialDays={calendarDays}
@@ -118,13 +105,13 @@ export default async function MultiDatePage({
       </div>
 
       <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
-        <PriceFilterForm
-          action={`/auctions/${county.slug}/multi`}
-          hiddenParams={{ dates: dates ?? undefined, zip: zipFilter }}
-          zip={zipFilter}
-          priceBasis={priceFilter?.basis}
-          minPrice={priceFilter?.min}
-        />
+        <div className="mb-4">
+          <FiltersPanel
+            action={`/auctions/${county.slug}/multi`}
+            hiddenParams={{ dates: dates ?? undefined, zip: zipFilter }}
+            initialFilters={filters}
+          />
+        </div>
 
         {error ? (
           <p className="rounded-lg border border-estimate bg-estimate-soft p-4 text-sm text-estimate">
@@ -136,8 +123,7 @@ export default async function MultiDatePage({
           </p>
         ) : listings.length === 0 ? (
           <p className="rounded-lg border border-border bg-surface p-6 text-center text-sm text-muted">
-            No listings across {scopeLabel} matched
-            {priceFilter ? ` ${PRICE_BASIS_LABELS[priceFilter.basis]} ≥ $${priceFilter.min.toLocaleString()}` : " your filters"}.
+            No listings across {scopeLabel} matched{filters ? " your filters" : ""}.
           </p>
         ) : (
           <>

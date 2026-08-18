@@ -2,7 +2,7 @@ import Link from "next/link";
 import { addDays, formatDisplayDate, toISODate } from "@/lib/dates";
 import type { County } from "@/lib/counties";
 import type { DayCount } from "@/lib/scrapeCalendar";
-import type { PriceFilterBasis } from "@/lib/getAuctionListings";
+import type { ListingFilters } from "@/lib/getAuctionListings";
 import { buildFilterQueryString } from "@/lib/filterParams";
 import { AuctionCalendar } from "@/components/AuctionCalendar";
 
@@ -10,21 +10,19 @@ export function DateNav({
   county,
   date,
   zip,
-  priceBasis,
-  minPrice,
+  filters,
   calendarDays,
 }: {
   county: County;
   date: string;
   zip?: string;
-  priceBasis?: PriceFilterBasis;
-  minPrice?: number;
+  filters?: ListingFilters;
   calendarDays: DayCount[];
 }) {
   const prev = addDays(date, -1);
   const next = addDays(date, 1);
   const today = toISODate(new Date());
-  const qs = buildFilterQueryString({ zip, priceBasis, minPrice });
+  const qs = buildFilterQueryString({ zip, filters });
   const [year, month] = date.split("-").map(Number);
 
   return (
@@ -54,8 +52,7 @@ export function DateNav({
           county={county}
           selectedDate={date}
           zip={zip}
-          priceBasis={priceBasis}
-          minPrice={minPrice}
+          filters={filters}
           initialYear={year}
           initialMonth={month}
           initialDays={calendarDays}

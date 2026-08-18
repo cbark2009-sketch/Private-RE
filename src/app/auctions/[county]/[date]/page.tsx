@@ -6,7 +6,7 @@ import { isValidISODate } from "@/lib/dates";
 import { getCounty } from "@/lib/counties";
 import { DateNav } from "@/components/DateNav";
 import { ListingCard } from "@/components/ListingCard";
-import { PriceFilterForm } from "@/components/PriceFilterForm";
+import { FiltersPanel } from "@/components/FiltersPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -64,12 +64,11 @@ export default async function AuctionDatePage({
           </div>
         ) : null}
 
-        {/* Price filtering searches every upcoming active date for this county at
-            once (not just today, and not just this month) - see /multi. */}
-        <PriceFilterForm
-          action={`/auctions/${county.slug}/multi`}
-          hiddenParams={{ zip: zipFilter }}
-        />
+        {/* Filtering searches every upcoming active date for this county at once
+            (not just today, and not just this month) - see /multi. */}
+        <div className="mb-4">
+          <FiltersPanel action={`/auctions/${county.slug}/multi`} hiddenParams={{ zip: zipFilter }} />
+        </div>
 
         {error ? (
           <p className="rounded-lg border border-estimate bg-estimate-soft p-4 text-sm text-estimate">
