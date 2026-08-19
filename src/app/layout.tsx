@@ -1,8 +1,18 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import "./globals.css";
 import { ZipSearchBar } from "@/components/ZipSearchBar";
 import { CountySelect } from "@/components/CountySelect";
+import { prisma } from "@/lib/db";
+import { verifySessionToken, SESSION_COOKIE_NAME } from "@/lib/auth";
+
+async function logout() {
+  "use server";
+  (await cookies()).delete(SESSION_COOKIE_NAME);
+  redirect("/login");
+}
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -20,11 +30,15 @@ export const metadata: Metadata = {
     "Upcoming Florida foreclosure auction listings translated into plain English, with rough value estimates.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
+  const username = verifySessionToken(token);
+  const currentUser = username ? await prisma.user.findUnique({ where: { username } }) : null;
+
   return (
     <html
       lang="en"
@@ -51,12 +65,20 @@ export default function RootLayout({
                 <span>search a zip</span>
                 <ZipSearchBar />
               </div>
-              <a
-                href="/auctions/search"
-                className="rounded-md border border-white/20 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/10"
-              >
-                🔍 Search multiple counties
-              </a>
+              {currentUser ? (
+                <>
+                  {currentUser.isOwner ? (
+                    <a href="/ceo" className="text-xs text-white/60 hover:text-white hover:underline">
+                      CEO
+                    </a>
+                  ) : null}
+                  <form action={logout}>
+                    <button type="submit" className="text-xs text-white/60 hover:text-white hover:underline">
+                      Log out
+                    </button>
+                  </form>
+                </>
+              ) : null}
             </div>
           </div>
         </header>

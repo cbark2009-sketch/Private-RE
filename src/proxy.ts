@@ -1,26 +1,44 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/auth";
+import { prisma } from "@/lib/db";
 
-// Guards the whole app behind one shared password via the browser's native
-// Basic Auth prompt. This is built for exactly two people (see project
-// history - explicitly local/personal use, not a public product), so a
-// single shared password is enough; no real accounts needed. Only active
-// when SITE_PASSWORD is set, so local dev (which never sets it) is never
-// gated behind a login prompt.
-export function proxy(request: NextRequest) {
-  const sitePassword = process.env.SITE_PASSWORD;
-  if (!sitePassword) return NextResponse.next();
+// Reachable without a valid session - the login page itself (and whatever
+// it POSTs to, which is the same URL via a Server Action) and the blocked
+// page, since a blocked or logged-out person still needs to be able to see
+// *why*. Everything else requires a real account. Replaces the old single
+// shared SITE_PASSWORD Basic Auth (see project history) now that access is
+// per-person.
+const PUBLIC_PATHS = ["/login", "/blocked"];
 
-  const authHeader = request.headers.get("authorization");
-  if (authHeader?.startsWith("Basic ")) {
-    const [, password] = atob(authHeader.slice("Basic ".length)).split(":");
-    if (password === sitePassword) return NextResponse.next();
+export async function proxy(request: NextRequest) {
+  // Same convenience as the old SITE_PASSWORD-unset behavior: an unset
+  // SESSION_SECRET (a fresh local clone that hasn't set one up) skips auth
+  // entirely rather than crashing - verifySessionToken would otherwise
+  // throw on every request. Production always has this set (see
+  // .env.example), so this never applies to a real deployment.
+  if (!process.env.SESSION_SECRET) return NextResponse.next();
+
+  const { pathname } = request.nextUrl;
+  if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
+    return NextResponse.next();
   }
 
-  return new NextResponse("Authentication required", {
-    status: 401,
-    headers: { "WWW-Authenticate": 'Basic realm="Auction Clarity"' },
-  });
+  const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+  const username = verifySessionToken(token);
+  if (!username) {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  // Checked fresh against the DB on every request, not encoded in the
+  // token itself - the whole point of the owner being able to block
+  // someone is that it takes effect immediately, not on their next login.
+  const user = await prisma.user.findUnique({ where: { username } });
+  if (!user || user.isBlocked) {
+    return NextResponse.redirect(new URL("/blocked", request.url));
+  }
+
+  return NextResponse.next();
 }
 
 export const config = {

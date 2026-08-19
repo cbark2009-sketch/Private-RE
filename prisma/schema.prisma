@@ -70,6 +70,22 @@ model PermitCache {
   @@id([countySlug, parcelId])
 }
 
+// A real account, replacing the old single-shared-password Basic Auth (see
+// src/proxy.ts). Provisioned by Claude on request (src/scripts/add-user.mjs),
+// not self-serve signup - built for a handful of people the owner knows
+// personally, not the public. isBlocked is checked fresh on every request
+// (src/proxy.ts), not baked into the session token, so blocking someone
+// takes effect immediately rather than only on their next login.
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  passwordSalt String
+  isOwner      Boolean  @default(false)
+  isBlocked    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+}
+
 // Cached RentCast /avm/value results, keyed by property address. The free
 // tier is 50 calls/month, so this cache is long-lived (30 days) - property
 // values don't move fast enough to justify spending calls re-checking often.
