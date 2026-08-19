@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getMultiDateListings, getActiveDatesAcrossMonths } from "@/lib/getMultiDateListings";
+import { getMultiDateListings, getActiveDatesInRange, defaultDateRange, DEFAULT_RANGE_DAYS } from "@/lib/getMultiDateListings";
 import { getCalendarMonth, getCalendarMonthForZip } from "@/lib/getCalendarMonth";
 import { isValidISODate } from "@/lib/dates";
 import { getCounty } from "@/lib/counties";
@@ -17,11 +17,11 @@ export default async function MultiDatePage({
   searchParams,
 }: {
   params: Promise<{ county: string }>;
-  searchParams: Promise<{ dates?: string; zip?: string } & FilterSearchParams>;
+  searchParams: Promise<{ dates?: string; zip?: string; dateFrom?: string; dateTo?: string } & FilterSearchParams>;
 }) {
   const { county: countySlug } = await params;
   const searchParamsResolved = await searchParams;
-  const { dates, zip } = searchParamsResolved;
+  const { dates, zip, dateFrom, dateTo } = searchParamsResolved;
 
   const county = getCounty(countySlug);
   if (!county) notFound();
@@ -29,8 +29,11 @@ export default async function MultiDatePage({
   const zipFilter = zip && /^\d{5}$/.test(zip) ? zip : undefined;
   const filters = parseListingFilters(searchParamsResolved);
 
-  // Scope is either an explicit date list (calendar multi-select) or
-  // "everything currently posted" (the filter-panel path) - the latter
+  const dateFromValid = dateFrom && isValidISODate(dateFrom) ? dateFrom : undefined;
+  const dateToValid = dateTo && isValidISODate(dateTo) ? dateTo : undefined;
+
+  // Scope is either an explicit date list (calendar multi-select) or a date
+  // range (explicit, or defaulting to the next 60 days) - the range path
   // deliberately ignores whatever month/day happened to be in view when the
   // filter was submitted, scanning forward from today instead, so applying
   // a filter never silently misses listings just because of which page you
@@ -42,14 +45,14 @@ export default async function MultiDatePage({
     dateList = dates.split(",").filter(isValidISODate);
     scopeLabel = `${dateList.length} selected day${dateList.length === 1 ? "" : "s"}`;
   } else {
-    const today = new Date();
-    dateList = await getActiveDatesAcrossMonths(countySlug, today.getUTCFullYear(), today.getUTCMonth() + 1).catch(
-      (err) => {
-        console.error(`Failed to resolve active dates for ${countySlug}:`, err);
-        return [];
-      }
-    );
-    scopeLabel = "every upcoming date";
+    const fallback = defaultDateRange();
+    const fromDate = dateFromValid ?? fallback.from;
+    const toDate = dateToValid ?? fallback.to;
+    dateList = await getActiveDatesInRange(countySlug, fromDate, toDate).catch((err) => {
+      console.error(`Failed to resolve active dates for ${countySlug} (${fromDate} to ${toDate}):`, err);
+      return [];
+    });
+    scopeLabel = dateFromValid || dateToValid ? `${fromDate} to ${toDate}` : "every upcoming date";
   }
 
   let listings: AuctionListingView[];
@@ -110,6 +113,9 @@ export default async function MultiDatePage({
             action={`/auctions/${county.slug}/multi`}
             hiddenParams={{ dates: dates ?? undefined, zip: zipFilter }}
             initialFilters={filters}
+            dateFrom={dateFromValid}
+            dateTo={dateToValid}
+            defaultRangeDays={dates ? undefined : DEFAULT_RANGE_DAYS}
           />
         </div>
 

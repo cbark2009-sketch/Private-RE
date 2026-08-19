@@ -17,10 +17,16 @@ export function FiltersPanel({
   action,
   hiddenParams = {},
   initialFilters,
+  dateFrom,
+  dateTo,
+  defaultRangeDays,
 }: {
   action: string;
   hiddenParams?: Record<string, string | undefined>;
   initialFilters?: ListingFilters;
+  dateFrom?: string;
+  dateTo?: string;
+  defaultRangeDays?: number;
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -60,7 +66,12 @@ export function FiltersPanel({
               value ? <input key={key} type="hidden" name={key} value={value} /> : null
             )}
 
-            <FilterFields initialFilters={initialFilters} />
+            <FilterFields
+              initialFilters={initialFilters}
+              dateFrom={dateFrom}
+              dateTo={dateTo}
+              defaultRangeDays={defaultRangeDays}
+            />
 
             <button
               type="submit"

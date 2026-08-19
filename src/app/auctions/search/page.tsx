@@ -1,5 +1,6 @@
-import { getListingsAcrossCounties } from "@/lib/getMultiDateListings";
+import { getListingsAcrossCounties, DEFAULT_RANGE_DAYS } from "@/lib/getMultiDateListings";
 import { getCounty } from "@/lib/counties";
+import { isValidISODate } from "@/lib/dates";
 import { parseListingFilters, type FilterSearchParams } from "@/lib/filterParams";
 import { ListingCard } from "@/components/ListingCard";
 import { CountyPicker, MAX_COUNTIES_PER_SEARCH } from "@/components/CountyPicker";
@@ -10,10 +11,10 @@ export const dynamic = "force-dynamic";
 export default async function CrossCountySearchPage({
   searchParams,
 }: {
-  searchParams: Promise<{ counties?: string | string[]; zip?: string } & FilterSearchParams>;
+  searchParams: Promise<{ counties?: string | string[]; zip?: string; dateFrom?: string; dateTo?: string } & FilterSearchParams>;
 }) {
   const resolved = await searchParams;
-  const { zip } = resolved;
+  const { zip, dateFrom, dateTo } = resolved;
 
   const requestedSlugs = (Array.isArray(resolved.counties) ? resolved.counties : resolved.counties ? [resolved.counties] : [])
     .filter((slug, i, arr) => arr.indexOf(slug) === i) // dedupe
@@ -24,11 +25,17 @@ export default async function CrossCountySearchPage({
   const hasSearched = requestedSlugs.length > 0;
   const overCap = requestedSlugs.length > MAX_COUNTIES_PER_SEARCH;
 
-  let listings: Awaited<ReturnType<typeof getListingsAcrossCounties>> = [];
+  const fromValid = dateFrom && isValidISODate(dateFrom) ? dateFrom : undefined;
+  const toValid = dateTo && isValidISODate(dateTo) ? dateTo : undefined;
+
+  let listings: Awaited<ReturnType<typeof getListingsAcrossCounties>>["listings"] = [];
+  let truncated: Awaited<ReturnType<typeof getListingsAcrossCounties>>["truncated"] = [];
   let error: string | null = null;
   if (hasSearched && !overCap) {
     try {
-      listings = await getListingsAcrossCounties(requestedSlugs, zipFilter, filters);
+      const result = await getListingsAcrossCounties(requestedSlugs, zipFilter, filters, { from: fromValid, to: toValid });
+      listings = result.listings;
+      truncated = result.truncated;
     } catch (err) {
       console.error("Cross-county search failed:", err);
       error = "Something went wrong loading these counties. Check the server logs for details.";
@@ -62,7 +69,7 @@ export default async function CrossCountySearchPage({
                   className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1 text-sm"
                 />
               </div>
-              <FilterFields initialFilters={filters} />
+              <FilterFields initialFilters={filters} dateFrom={fromValid} dateTo={toValid} defaultRangeDays={DEFAULT_RANGE_DAYS} />
             </div>
           </div>
         </form>
@@ -78,26 +85,41 @@ export default async function CrossCountySearchPage({
           <p className="rounded-lg border border-border bg-surface p-6 text-center text-sm text-muted">
             Pick at least one county above to search.
           </p>
-        ) : listings.length === 0 ? (
-          <p className="rounded-lg border border-border bg-surface p-6 text-center text-sm text-muted">
-            No listings matched across the selected counties.
-          </p>
         ) : (
           <>
-            <p className="mb-4 text-sm text-muted">
-              {listings.length} case{listings.length === 1 ? "" : "s"} across {requestedSlugs.length}{" "}
-              count{requestedSlugs.length === 1 ? "y" : "ies"}
-            </p>
-            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-              {listings.map((listing) => (
-                <ListingCard
-                  key={`${listing.countySlug}-${listing.auctionDate}-${listing.caseNumber}`}
-                  listing={listing}
-                  showDate
-                  countyName={listing.countyName}
-                />
-              ))}
-            </div>
+            {truncated.length > 0 ? (
+              <div className="mb-4 rounded-lg border border-estimate bg-estimate-soft p-3 text-xs text-estimate">
+                {truncated.map((t) => (
+                  <p key={t.countyName}>
+                    {t.countyName} has {t.foundCount} active dates in this range - showing the nearest {t.shownCount}{" "}
+                    to keep the search fast. Narrow the date range to see more of a specific window.
+                  </p>
+                ))}
+              </div>
+            ) : null}
+
+            {listings.length === 0 ? (
+              <p className="rounded-lg border border-border bg-surface p-6 text-center text-sm text-muted">
+                No listings matched across the selected counties and date range.
+              </p>
+            ) : (
+              <>
+                <p className="mb-4 text-sm text-muted">
+                  {listings.length} case{listings.length === 1 ? "" : "s"} across {requestedSlugs.length}{" "}
+                  count{requestedSlugs.length === 1 ? "y" : "ies"}
+                </p>
+                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                  {listings.map((listing) => (
+                    <ListingCard
+                      key={`${listing.countySlug}-${listing.auctionDate}-${listing.caseNumber}`}
+                      listing={listing}
+                      showDate
+                      countyName={listing.countyName}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
           </>
         )}
       </div>

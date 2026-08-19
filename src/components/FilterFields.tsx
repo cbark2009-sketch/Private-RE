@@ -21,16 +21,49 @@ export function countActiveFilters(filters: ListingFilters | undefined): number 
 }
 
 /**
- * The raw min/max + spread inputs shared between `FiltersPanel` (popover, on
- * the single/multi-date pages) and the cross-county search page (shown
- * inline, not behind a popover, since that page exists specifically for
- * setting up a detailed search). No `<form>` wrapper here on purpose - the
- * caller owns the form so these can sit alongside other fields (e.g. a
+ * The raw min/max + spread + date-range inputs shared between `FiltersPanel`
+ * (popover, on the single/multi-date pages) and the cross-county search page
+ * (shown inline, not behind a popover, since that page exists specifically
+ * for setting up a detailed search). No `<form>` wrapper here on purpose -
+ * the caller owns the form so these can sit alongside other fields (e.g. a
  * county picker) inside one submission.
  */
-export function FilterFields({ initialFilters }: { initialFilters?: ListingFilters }) {
+export function FilterFields({
+  initialFilters,
+  dateFrom,
+  dateTo,
+  defaultRangeDays,
+}: {
+  initialFilters?: ListingFilters;
+  dateFrom?: string;
+  dateTo?: string;
+  /** Shown in the helper text under the date inputs, e.g. "next 60 days" - the actual default is applied server-side, this is just what to tell the user. */
+  defaultRangeDays?: number;
+}) {
   return (
     <>
+      <div>
+        <label className="text-xs font-medium text-foreground">Date range</label>
+        <div className="mt-1 flex items-center gap-2">
+          <input
+            type="date"
+            name="dateFrom"
+            defaultValue={dateFrom ?? ""}
+            className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm"
+          />
+          <span className="text-muted">–</span>
+          <input
+            type="date"
+            name="dateTo"
+            defaultValue={dateTo ?? ""}
+            className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm"
+          />
+        </div>
+        {defaultRangeDays ? (
+          <p className="mt-0.5 text-[11px] text-muted">Leave blank to search the next {defaultRangeDays} days.</p>
+        ) : null}
+      </div>
+
       {RANGE_FIELDS.map((f) => (
         <div key={f.key}>
           <label className="text-xs font-medium text-foreground">{FIELD_LABELS[f.key]}</label>
