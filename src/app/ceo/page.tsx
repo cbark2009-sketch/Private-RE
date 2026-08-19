@@ -1,8 +1,13 @@
+import { randomBytes } from "node:crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
-import { verifySessionToken, SESSION_COOKIE_NAME } from "@/lib/auth";
+import { verifySessionToken, SESSION_COOKIE_NAME, hashPassword } from "@/lib/auth";
+import { AddUserForm, type AddUserResult } from "@/components/AddUserForm";
+import { UserRow, type RenameResult } from "@/components/UserRow";
+
+const USERNAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
 /** Redirects non-owners straight to `/` - doesn't reveal that this route exists or why access was denied. Re-checked on every server action below too, not just page load. */
 async function requireOwner() {
@@ -23,6 +28,46 @@ async function setBlocked(formData: FormData) {
   revalidatePath("/ceo");
 }
 
+async function renameUser(_prevState: RenameResult, formData: FormData): Promise<RenameResult> {
+  "use server";
+  await requireOwner();
+  const userId = String(formData.get("userId"));
+  const newUsername = String(formData.get("newUsername") ?? "").trim();
+
+  if (!newUsername) return { error: "Username can't be empty." };
+  if (!USERNAME_PATTERN.test(newUsername)) return { error: "Only letters, numbers, - and _ are allowed." };
+
+  const existing = await prisma.user.findUnique({ where: { username: newUsername } });
+  if (existing && existing.id !== userId) return { error: `"${newUsername}" is already taken.` };
+
+  await prisma.user.update({ where: { id: userId }, data: { username: newUsername } });
+  revalidatePath("/ceo");
+  return null;
+}
+
+// Renaming changes what a person's existing session token refers to (it's
+// signed with their username), so it stops matching on their next request
+// and they land back at /login - not a bug, just means "log in again with
+// your new username and the same password" after a rename, same as a real
+// account-name change on most sites.
+async function addUser(_prevState: AddUserResult, formData: FormData): Promise<AddUserResult> {
+  "use server";
+  await requireOwner();
+  const username = String(formData.get("username") ?? "").trim();
+
+  if (!username) return { error: "Username can't be empty." };
+  if (!USERNAME_PATTERN.test(username)) return { error: "Only letters, numbers, - and _ are allowed." };
+
+  const existing = await prisma.user.findUnique({ where: { username } });
+  if (existing) return { error: `"${username}" is already taken.` };
+
+  const password = randomBytes(9).toString("base64url");
+  const { hash, salt } = hashPassword(password);
+  await prisma.user.create({ data: { username, passwordHash: hash, passwordSalt: salt } });
+  revalidatePath("/ceo");
+  return { username, password };
+}
+
 export default async function CeoPage() {
   await requireOwner();
   const users = await prisma.user.findMany({ orderBy: { createdAt: "asc" } });
@@ -35,35 +80,24 @@ export default async function CeoPage() {
         out or in again.
       </p>
 
+      <div className="mt-4">
+        <AddUserForm action={addUser} />
+      </div>
+
       <div className="mt-4 divide-y divide-border rounded-lg border border-border bg-surface">
         {users.map((u) => (
-          <div key={u.id} className="flex items-center justify-between gap-3 p-3">
-            <div>
-              <p className="text-sm font-medium text-foreground">
-                {u.username}
-                {u.isOwner ? <span className="ml-2 text-xs text-accent">Owner</span> : null}
-              </p>
-              <p className="text-xs text-muted">
-                Added {u.createdAt.toLocaleDateString()} · {u.isBlocked ? "Blocked" : "Active"}
-              </p>
-            </div>
-            {!u.isOwner ? (
-              <form action={setBlocked}>
-                <input type="hidden" name="userId" value={u.id} />
-                <input type="hidden" name="blocked" value={String(!u.isBlocked)} />
-                <button
-                  type="submit"
-                  className={`rounded-md px-3 py-1.5 text-xs font-medium ${
-                    u.isBlocked
-                      ? "bg-accent text-navy hover:opacity-90"
-                      : "border border-estimate text-estimate hover:bg-estimate-soft"
-                  }`}
-                >
-                  {u.isBlocked ? "Unblock" : "Block"}
-                </button>
-              </form>
-            ) : null}
-          </div>
+          <UserRow
+            key={u.id}
+            user={{
+              id: u.id,
+              username: u.username,
+              isOwner: u.isOwner,
+              isBlocked: u.isBlocked,
+              addedDate: u.createdAt.toLocaleDateString(),
+            }}
+            setBlockedAction={setBlocked}
+            renameAction={renameUser}
+          />
         ))}
       </div>
     </div>
