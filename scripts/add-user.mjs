@@ -14,7 +14,7 @@ import { randomBytes } from "node:crypto";
 import { prisma } from "../src/lib/db.ts";
 import { hashPassword } from "../src/lib/auth.ts";
 
-const username = process.argv[2];
+const username = process.argv[2]?.toLowerCase();
 const isOwner = process.argv.includes("--owner");
 
 if (!username) {

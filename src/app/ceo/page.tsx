@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { verifySessionToken, SESSION_COOKIE_NAME, hashPassword } from "@/lib/auth";
 import { AddUserForm, type AddUserResult } from "@/components/AddUserForm";
-import { UserRow, type RenameResult } from "@/components/UserRow";
+import { UserRow, type RenameResult, type ChangePasswordResult } from "@/components/UserRow";
 
 const USERNAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
@@ -32,7 +32,7 @@ async function renameUser(_prevState: RenameResult, formData: FormData): Promise
   "use server";
   await requireOwner();
   const userId = String(formData.get("userId"));
-  const newUsername = String(formData.get("newUsername") ?? "").trim();
+  const newUsername = String(formData.get("newUsername") ?? "").trim().toLowerCase();
 
   if (!newUsername) return { error: "Username can't be empty." };
   if (!USERNAME_PATTERN.test(newUsername)) return { error: "Only letters, numbers, - and _ are allowed." };
@@ -53,7 +53,7 @@ async function renameUser(_prevState: RenameResult, formData: FormData): Promise
 async function addUser(_prevState: AddUserResult, formData: FormData): Promise<AddUserResult> {
   "use server";
   await requireOwner();
-  const username = String(formData.get("username") ?? "").trim();
+  const username = String(formData.get("username") ?? "").trim().toLowerCase();
 
   if (!username) return { error: "Username can't be empty." };
   if (!USERNAME_PATTERN.test(username)) return { error: "Only letters, numbers, - and _ are allowed." };
@@ -66,6 +66,23 @@ async function addUser(_prevState: AddUserResult, formData: FormData): Promise<A
   await prisma.user.create({ data: { username, passwordHash: hash, passwordSalt: salt } });
   revalidatePath("/ceo");
   return { username, password };
+}
+
+async function changePassword(
+  _prevState: ChangePasswordResult,
+  formData: FormData
+): Promise<ChangePasswordResult> {
+  "use server";
+  await requireOwner();
+  const userId = String(formData.get("userId"));
+  const typed = String(formData.get("newPassword") ?? "").trim();
+  if (typed && typed.length < 8) return { error: "Password must be at least 8 characters." };
+
+  const password = typed || randomBytes(9).toString("base64url");
+  const { hash, salt } = hashPassword(password);
+  await prisma.user.update({ where: { id: userId }, data: { passwordHash: hash, passwordSalt: salt } });
+  revalidatePath("/ceo");
+  return { password };
 }
 
 export default async function CeoPage() {
@@ -97,6 +114,7 @@ export default async function CeoPage() {
             }}
             setBlockedAction={setBlocked}
             renameAction={renameUser}
+            changePasswordAction={changePassword}
           />
         ))}
       </div>

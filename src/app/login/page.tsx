@@ -5,7 +5,10 @@ import { verifyPassword, createSessionToken, SESSION_COOKIE_NAME, SESSION_COOKIE
 
 async function login(formData: FormData) {
   "use server";
-  const username = String(formData.get("username") ?? "").trim();
+  // Lowercased because usernames are stored lowercase (see addUser/renameUser
+  // in ceo/page.tsx) - without this, a phone/tablet keyboard autocapitalizing
+  // the first letter would silently fail an otherwise-correct login.
+  const username = String(formData.get("username") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
 
   const user = await prisma.user.findUnique({ where: { username } });
@@ -39,6 +42,10 @@ export default async function LoginPage({
               name="username"
               required
               autoFocus
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              autoComplete="username"
               className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
             />
           </div>
@@ -48,6 +55,7 @@ export default async function LoginPage({
               type="password"
               name="password"
               required
+              autoComplete="current-password"
               className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
             />
           </div>

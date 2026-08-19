@@ -28,6 +28,9 @@ export function AddUserForm({
             name="username"
             required
             placeholder="e.g. john"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
             className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
           />
         </div>
