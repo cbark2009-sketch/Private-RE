@@ -3,6 +3,7 @@ import { formatMoney } from "@/lib/format";
 import { formatShortDate } from "@/lib/dates";
 import { PermitsSection } from "@/components/PermitsSection";
 import { buildZillowUrl } from "@/lib/zillow";
+import { isLikelyHoaOrLienCase } from "@/lib/caseType";
 
 function EstimateBadge() {
   return (
@@ -85,6 +86,11 @@ export function ListingCard({
 
       <div className="flex flex-1 flex-col gap-4 p-4">
         <div>
+          {isLikelyHoaOrLienCase(listing.caseNumber) ? (
+            <span className="mb-1 inline-block rounded-full border border-border bg-background px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
+              Likely HOA/Lien Case
+            </span>
+          ) : null}
           <h3 className="text-base font-semibold text-foreground">
             {listing.propertyAddress ?? "No address on file (e.g. timeshare interest)"}
           </h3>
