@@ -4,6 +4,7 @@ import { formatShortDate } from "@/lib/dates";
 import { PermitsSection } from "@/components/PermitsSection";
 import { buildZillowUrl } from "@/lib/zillow";
 import { isLikelyHoaOrLienCase } from "@/lib/caseType";
+import { toggleFavorite } from "@/app/actions/favorites";
 
 function EstimateBadge() {
   return (
@@ -48,12 +49,15 @@ export function ListingCard({
   listing,
   showDate = false,
   countyName,
+  isFavorited = false,
 }: {
   listing: AuctionListingView;
   /** Show which auction date this card is from - turn on for combined multi-date views. */
   showDate?: boolean;
   /** Show which county this card is from - for cross-county views like the homepage's good-deals section. */
   countyName?: string;
+  /** Whether the current user has already favorited this case - controls the star's filled/outline state. */
+  isFavorited?: boolean;
 }) {
   const mapQuery = encodeURIComponent(listing.propertyAddress ?? "");
   const zillowUrl = listing.propertyAddress ? buildZillowUrl(listing.propertyAddress) : null;
@@ -70,6 +74,20 @@ export function ListingCard({
             {badge}
           </span>
         ) : null}
+        <form action={toggleFavorite} className="absolute right-2 top-2 z-10">
+          <input type="hidden" name="countySlug" value={listing.countySlug} />
+          <input type="hidden" name="caseNumber" value={listing.caseNumber} />
+          <button
+            type="submit"
+            aria-label={isFavorited ? "Remove from favorites" : "Add to favorites"}
+            aria-pressed={isFavorited}
+            className={`flex h-8 w-8 items-center justify-center rounded-full text-base shadow transition-colors ${
+              isFavorited ? "bg-accent text-white" : "bg-navy/70 text-white hover:bg-navy/90"
+            }`}
+          >
+            {isFavorited ? "★" : "☆"}
+          </button>
+        </form>
         {hasAddress ? (
           <iframe
             title={`Map of ${listing.propertyAddress}`}

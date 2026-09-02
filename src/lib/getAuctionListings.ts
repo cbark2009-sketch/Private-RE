@@ -6,6 +6,8 @@ import { getPermitsForListing, type PermitResult } from "@/lib/permits";
 import { getCounty, type County } from "@/lib/counties";
 
 export interface AuctionListingView {
+  countySlug: string;
+  countyName: string;
   caseNumber: string;
   caseDetailUrl: string | null;
   auctionDate: string;
@@ -110,40 +112,73 @@ export async function getAuctionListings(
   );
 
   const views = await Promise.all(
-    complete.map(async (row) => {
-      const [market, permits] = await Promise.all([
-        (liveEstimates ? getMarketEstimate(row.propertyAddress!) : getCachedMarketEstimate(row.propertyAddress!)).catch(
-          (err) => {
-            console.error(`Market estimate failed for "${row.propertyAddress}":`, err);
-            return null;
-          }
-        ),
-        skipPermits
-          ? Promise.resolve(null)
-          : getPermitsForListing(county.slug, row.parcelId).catch((err) => {
-              console.error(`Permit lookup failed for "${row.propertyAddress}" (parcel ${row.parcelId}):`, err);
-              return null;
-            }),
-      ]);
-      return {
-        caseNumber: row.caseNumber,
-        caseDetailUrl: row.caseDetailUrl,
-        auctionDate,
-        finalJudgmentAmount: row.finalJudgmentAmount,
-        estimatedMaxBid: row.estimatedMaxBid,
-        propertyAddress: row.propertyAddress,
-        zipCode: row.zipCode,
-        assessedValue: row.assessedValueAtSale,
-        parcelId: row.parcelId,
-        parcelUrl: row.parcelUrl,
-        valueEstimate: estimatePropertyValue({ assessedValue: row.assessedValueAtSale, market }),
-        permits,
-      };
-    })
+    complete.map((row) => buildListingView(row, county, auctionDate, { liveEstimates, skipPermits }))
   );
 
   if (!filters) return views;
   return views.filter((v) => matchesFilters(v, filters));
+}
+
+interface ListingRowLike {
+  caseNumber: string;
+  caseDetailUrl: string | null;
+  finalJudgmentAmount: number | null;
+  estimatedMaxBid: number | null;
+  propertyAddress: string | null;
+  zipCode: string | null;
+  assessedValueAtSale: number | null;
+  parcelId: string | null;
+  parcelUrl: string | null;
+}
+
+/**
+ * Turns one raw DB row into a view-ready listing (market estimate + permits
+ * resolved). Factored out of getAuctionListings's per-date loop so
+ * getFavoritedListings (src/lib/favorites.ts) can build the same view shape
+ * for a scattered set of favorited cases, which aren't all from the same
+ * date - see that file for why favorites are resolved one row at a time
+ * instead of by date like every other listing view in this app.
+ */
+export async function buildListingView(
+  row: ListingRowLike,
+  county: County,
+  auctionDate: string,
+  options?: { liveEstimates?: boolean; skipPermits?: boolean }
+): Promise<AuctionListingView> {
+  const liveEstimates = options?.liveEstimates ?? true;
+  const skipPermits = options?.skipPermits ?? false;
+
+  const [market, permits] = await Promise.all([
+    (liveEstimates ? getMarketEstimate(row.propertyAddress!) : getCachedMarketEstimate(row.propertyAddress!)).catch(
+      (err) => {
+        console.error(`Market estimate failed for "${row.propertyAddress}":`, err);
+        return null;
+      }
+    ),
+    skipPermits
+      ? Promise.resolve(null)
+      : getPermitsForListing(county.slug, row.parcelId).catch((err) => {
+          console.error(`Permit lookup failed for "${row.propertyAddress}" (parcel ${row.parcelId}):`, err);
+          return null;
+        }),
+  ]);
+
+  return {
+    countySlug: county.slug,
+    countyName: county.name,
+    caseNumber: row.caseNumber,
+    caseDetailUrl: row.caseDetailUrl,
+    auctionDate,
+    finalJudgmentAmount: row.finalJudgmentAmount,
+    estimatedMaxBid: row.estimatedMaxBid,
+    propertyAddress: row.propertyAddress,
+    zipCode: row.zipCode,
+    assessedValue: row.assessedValueAtSale,
+    parcelId: row.parcelId,
+    parcelUrl: row.parcelUrl,
+    valueEstimate: estimatePropertyValue({ assessedValue: row.assessedValueAtSale, market }),
+    permits,
+  };
 }
 
 /**

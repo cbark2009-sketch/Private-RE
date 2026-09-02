@@ -7,6 +7,8 @@ import { getCounty } from "@/lib/counties";
 import { DateNav } from "@/components/DateNav";
 import { ListingCard } from "@/components/ListingCard";
 import { FiltersPanel } from "@/components/FiltersPanel";
+import { getCurrentUserId } from "@/lib/currentUser";
+import { getFavoriteKeySet, isFavorited } from "@/lib/favorites";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +27,7 @@ export default async function AuctionDatePage({
   if (!county) notFound();
 
   const zipFilter = zip && /^\d{5}$/.test(zip) ? zip : undefined;
+  const favoriteKeys = await getFavoriteKeySet(await getCurrentUserId());
 
   let listings: AuctionListingView[];
   let error: string | null = null;
@@ -86,7 +89,11 @@ export default async function AuctionDatePage({
             </p>
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {listings.map((listing) => (
-                <ListingCard key={listing.caseNumber} listing={listing} />
+                <ListingCard
+                  key={listing.caseNumber}
+                  listing={listing}
+                  isFavorited={isFavorited(favoriteKeys, listing.countySlug, listing.caseNumber)}
+                />
               ))}
             </div>
           </>

@@ -86,6 +86,23 @@ model User {
   createdAt    DateTime @default(now())
 }
 
+// A user's saved listings, so they don't have to re-search to find something
+// they've already looked at. Keyed by (countySlug, caseNumber) rather than a
+// specific Listing row id - a case can get rescheduled to a new auction date
+// (a new Listing row, same case - see Listing's comment above), and a
+// favorite should keep following the same case, not point at a stale,
+// superseded date.
+model Favorite {
+  id         String   @id @default(cuid())
+  userId     String
+  countySlug String
+  caseNumber String
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, countySlug, caseNumber])
+  @@index([userId])
+}
+
 // Cached RentCast /avm/value results, keyed by property address. The free
 // tier is 50 calls/month, so this cache is long-lived (30 days) - property
 // values don't move fast enough to justify spending calls re-checking often.

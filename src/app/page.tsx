@@ -6,6 +6,8 @@ import { parseListingFilters, type FilterSearchParams } from "@/lib/filterParams
 import { ListingCard } from "@/components/ListingCard";
 import { CountyPicker, MAX_COUNTIES_PER_SEARCH } from "@/components/CountyPicker";
 import { FilterFields } from "@/components/FilterFields";
+import { getCurrentUserId } from "@/lib/currentUser";
+import { getFavoriteKeySet, isFavorited } from "@/lib/favorites";
 
 // Without this, Next.js prerenders the page once at build time and serves
 // that same static HTML to everyone - both the good-deals section and any
@@ -20,6 +22,7 @@ export default async function HomePage({
 }) {
   const resolved = await searchParams;
   const { zip, dateFrom, dateTo } = resolved;
+  const favoriteKeys = await getFavoriteKeySet(await getCurrentUserId());
 
   const requestedSlugs = (Array.isArray(resolved.counties) ? resolved.counties : resolved.counties ? [resolved.counties] : [])
     .filter((slug, i, arr) => arr.indexOf(slug) === i) // dedupe
@@ -73,6 +76,7 @@ export default async function HomePage({
                 listing={deal}
                 showDate
                 countyName={deal.countyName}
+                isFavorited={isFavorited(favoriteKeys, deal.countySlug, deal.caseNumber)}
               />
             ))}
           </div>
@@ -146,6 +150,7 @@ export default async function HomePage({
                       listing={listing}
                       showDate
                       countyName={listing.countyName}
+                      isFavorited={isFavorited(favoriteKeys, listing.countySlug, listing.caseNumber)}
                     />
                   ))}
                 </div>

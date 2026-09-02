@@ -9,6 +9,8 @@ import type { AuctionListingView } from "@/lib/getAuctionListings";
 import { ListingCard } from "@/components/ListingCard";
 import { FiltersPanel } from "@/components/FiltersPanel";
 import { AuctionCalendar } from "@/components/AuctionCalendar";
+import { getCurrentUserId } from "@/lib/currentUser";
+import { getFavoriteKeySet, isFavorited } from "@/lib/favorites";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +56,8 @@ export default async function MultiDatePage({
     });
     scopeLabel = dateFromValid || dateToValid ? `${fromDate} to ${toDate}` : "every upcoming date";
   }
+
+  const favoriteKeys = await getFavoriteKeySet(await getCurrentUserId());
 
   let listings: AuctionListingView[];
   let error: string | null = null;
@@ -138,7 +142,12 @@ export default async function MultiDatePage({
             </p>
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {listings.map((listing) => (
-                <ListingCard key={`${listing.auctionDate}-${listing.caseNumber}`} listing={listing} showDate />
+                <ListingCard
+                  key={`${listing.auctionDate}-${listing.caseNumber}`}
+                  listing={listing}
+                  showDate
+                  isFavorited={isFavorited(favoriteKeys, listing.countySlug, listing.caseNumber)}
+                />
               ))}
             </div>
           </>
