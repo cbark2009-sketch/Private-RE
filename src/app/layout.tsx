@@ -75,9 +75,12 @@ export default async function RootLayout({
                       CEO
                     </a>
                   ) : null}
-                  <form action={logout}>
-                    <button type="submit" className="text-xs text-white/60 hover:text-white hover:underline">
-                      Log out
+                  <form action={logout} className="sm:ml-2">
+                    <button
+                      type="submit"
+                      className="rounded-md border border-white/30 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/10"
+                    >
+                      Sign out
                     </button>
                   </form>
                 </>
