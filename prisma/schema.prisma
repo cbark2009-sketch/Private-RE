@@ -130,3 +130,17 @@ model GeocodeCache {
   failed    Boolean  @default(false)
   fetchedAt DateTime @default(now())
 }
+
+// Cached RentCast /properties record (beds, baths, sqft, lot, year built,
+// pool, garage, HOA, taxes, sale history) for the property page
+// (src/lib/propertyDetails.ts), keyed by property address. `data` is our
+// own normalized JSON, deliberately WITHOUT the owner's name and mailing
+// address that RentCast also returns - this app has no use for them. Same
+// 50-calls/month quota as ValueEstimateCache, and a house's specs change
+// even less often than its value, so this is kept 180 days.
+model PropertyDetailsCache {
+  address   String   @id
+  data      String?
+  failed    Boolean  @default(false)
+  fetchedAt DateTime @default(now())
+}

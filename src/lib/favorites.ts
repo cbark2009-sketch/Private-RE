@@ -1,6 +1,5 @@
 import { prisma } from "@/lib/db";
-import { getCounty } from "@/lib/counties";
-import { buildListingView, type AuctionListingView } from "@/lib/getAuctionListings";
+import { getListingForCase, type AuctionListingView } from "@/lib/getAuctionListings";
 
 function key(countySlug: string, caseNumber: string): string {
   return `${countySlug}:${caseNumber}`;
@@ -35,17 +34,10 @@ export async function getFavoritedListings(userId: string): Promise<AuctionListi
 
   const views: AuctionListingView[] = [];
   for (const fav of favorites) {
-    const county = getCounty(fav.countySlug);
-    if (!county) continue; // shouldn't happen - a county was removed from counties.ts after being favorited
-
-    const row = await prisma.listing.findFirst({
-      where: { countySlug: fav.countySlug, caseNumber: fav.caseNumber },
-      orderBy: { auctionDate: "desc" },
-    });
-    if (!row) continue; // no known listing row for this case (shouldn't happen - rows are never deleted)
-
-    const auctionDate = row.auctionDate.toISOString().slice(0, 10);
-    views.push(await buildListingView(row, county, auctionDate, { liveEstimates: false }));
+    // Null shouldn't happen (rows are never deleted) unless a county was
+    // removed from counties.ts after being favorited.
+    const view = await getListingForCase(fav.countySlug, fav.caseNumber, { liveEstimates: false });
+    if (view) views.push(view);
   }
   return views;
 }

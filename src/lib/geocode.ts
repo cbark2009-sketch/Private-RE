@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { ensureTable } from "@/lib/ensureTable";
 
 // Address -> map coordinates via the US Census Bureau's free geocoder
 // (geocoding.geo.census.gov) - no API key, no quota, and public-domain
@@ -25,32 +26,15 @@ export interface Coordinates {
   lng: number;
 }
 
-/**
- * Production's Turso database only gets schema changes when someone runs
- * scripts/apply-migration.mjs by hand. This table is self-contained (nothing
- * else references it), so it's created on first use instead - the map then
- * works on the very next deploy with no manual step. Same SQL as the
- * add_geocode_cache migration, which also uses IF NOT EXISTS so neither path
- * can conflict with the other.
- */
-let tableReady: Promise<unknown> | null = null;
-function ensureTable(): Promise<unknown> {
-  tableReady ??= prisma
-    .$executeRawUnsafe(
-      `CREATE TABLE IF NOT EXISTS "GeocodeCache" (
-        "address" TEXT NOT NULL PRIMARY KEY,
-        "lat" REAL,
-        "lng" REAL,
-        "failed" BOOLEAN NOT NULL DEFAULT false,
-        "fetchedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )`
-    )
-    .catch((err) => {
-      tableReady = null; // let the next call try again
-      throw err;
-    });
-  return tableReady;
-}
+// Same SQL as the add_geocode_cache migration - see ensureTable.ts for why
+// this table creates itself.
+const CREATE_TABLE_SQL = `CREATE TABLE IF NOT EXISTS "GeocodeCache" (
+  "address" TEXT NOT NULL PRIMARY KEY,
+  "lat" REAL,
+  "lng" REAL,
+  "failed" BOOLEAN NOT NULL DEFAULT false,
+  "fetchedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+)`;
 
 export interface CachedCoordinates {
   found: Map<string, Coordinates>;
@@ -60,7 +44,7 @@ export interface CachedCoordinates {
 
 /** Cache-only lookup - never calls Census. Anything in neither set just hasn't been geocoded yet. */
 export async function getCachedCoordinates(addresses: string[]): Promise<CachedCoordinates> {
-  await ensureTable();
+  await ensureTable(CREATE_TABLE_SQL);
   const found = new Map<string, Coordinates>();
   const unlocatable = new Set<string>();
   const unique = [...new Set(addresses)];

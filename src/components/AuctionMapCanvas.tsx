@@ -2,9 +2,11 @@
 
 import "leaflet/dist/leaflet.css";
 import { useEffect, useRef } from "react";
-import { MapContainer, TileLayer, CircleMarker, Popup, LayersControl, ZoomControl, useMap } from "react-leaflet";
+import { useRouter } from "next/navigation";
+import { MapContainer, TileLayer, CircleMarker, Tooltip, LayersControl, ZoomControl, useMap } from "react-leaflet";
 import type { LatLngBoundsExpression } from "leaflet";
 import { DOT_COLORS, type PlacedPoint } from "@/lib/mapDots";
+import { propertyHref } from "@/lib/links";
 import { formatMoney } from "@/lib/format";
 import { formatShortDate } from "@/lib/dates";
 
@@ -58,6 +60,8 @@ function FitToPoints({ points, settled }: { points: PlacedPoint[]; settled: bool
 }
 
 export function AuctionMapCanvas({ points, settled }: { points: PlacedPoint[]; settled: boolean }) {
+  const router = useRouter();
+
   return (
     <MapContainer bounds={FLORIDA_BOUNDS} preferCanvas zoomControl={false} className="h-full w-full">
       <LayersControl position="topright">
@@ -90,10 +94,13 @@ export function AuctionMapCanvas({ points, settled }: { points: PlacedPoint[]; s
             fillColor: p.likelyHoa ? DOT_COLORS.hoa : DOT_COLORS.foreclosure,
             fillOpacity: 0.95,
           }}
+          // Clicking a dot goes straight to that house's own page; hovering
+          // shows a quick preview first so you can tell dots apart.
+          eventHandlers={{ click: () => router.push(propertyHref(p.countySlug, p.caseNumber)) }}
         >
-          {/* Leaflet popups are always white, so colors are fixed here rather than following the site's dark mode. */}
-          <Popup>
-            <div className="flex min-w-48 flex-col gap-1 text-xs" style={{ color: "#14152b" }}>
+          {/* Leaflet tooltips are always white, so colors are fixed here rather than following the site's dark mode. */}
+          <Tooltip direction="top" offset={[0, -6]}>
+            <div className="flex flex-col gap-0.5 text-xs" style={{ color: "#14152b" }}>
               <strong className="text-sm">{p.address}</strong>
               <span style={{ color: "#63677e" }}>
                 {p.countyName} County · {formatShortDate(p.auctionDate)}
@@ -105,11 +112,11 @@ export function AuctionMapCanvas({ points, settled }: { points: PlacedPoint[]; s
               ) : null}
               <span>Final judgment: {formatMoney(p.judgment)}</span>
               {p.valueEstimate != null ? <span>Value estimate: {formatMoney(p.valueEstimate)}</span> : null}
-              <a href={`/auctions/${p.countySlug}/${p.auctionDate}`} className="mt-1 font-semibold">
-                See that day&rsquo;s auctions →
-              </a>
+              <span className="mt-0.5 font-semibold" style={{ color: DOT_COLORS.foreclosure }}>
+                Click for full details
+              </span>
             </div>
-          </Popup>
+          </Tooltip>
         </CircleMarker>
       ))}
     </MapContainer>

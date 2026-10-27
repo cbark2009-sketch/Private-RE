@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { AuctionListingView } from "@/lib/getAuctionListings";
+import { propertyHref } from "@/lib/links";
 import { formatMoney } from "@/lib/format";
 import { formatShortDate } from "@/lib/dates";
 import { PermitsSection } from "@/components/PermitsSection";
@@ -22,7 +24,8 @@ function FactBadge() {
   );
 }
 
-function Stat({
+/** One labeled number with a "From case record" / "Estimate" badge - also used by the property page. */
+export function Stat({
   label,
   value,
   badge,
@@ -62,6 +65,7 @@ export function ListingCard({
   const mapQuery = encodeURIComponent(listing.propertyAddress ?? "");
   const zillowUrl = listing.propertyAddress ? buildZillowUrl(listing.propertyAddress) : null;
   const hasAddress = Boolean(listing.propertyAddress);
+  const detailsHref = propertyHref(listing.countySlug, listing.caseNumber);
   const badge = [countyName, showDate ? formatShortDate(listing.auctionDate) : null]
     .filter(Boolean)
     .join(" · ");
@@ -110,7 +114,16 @@ export function ListingCard({
             </span>
           ) : null}
           <h3 className="text-base font-semibold text-foreground">
-            {listing.propertyAddress ?? "No address on file (e.g. timeshare interest)"}
+            {listing.propertyAddress ? (
+              // prefetch off: opening a property page can spend a RentCast
+              // lookup, so it must only load when someone actually clicks -
+              // not for every card that scrolls into view.
+              <Link href={detailsHref} prefetch={false} className="hover:text-accent hover:underline">
+                {listing.propertyAddress}
+              </Link>
+            ) : (
+              "No address on file (e.g. timeshare interest)"
+            )}
           </h3>
           <p className="text-xs text-muted">Case #{listing.caseNumber}</p>
         </div>
@@ -162,6 +175,11 @@ export function ListingCard({
         <PermitsSection permits={listing.permits} />
 
         <div className="mt-auto flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-3 text-xs">
+          {hasAddress ? (
+            <Link href={detailsHref} prefetch={false} className="font-semibold text-accent hover:underline">
+              House details →
+            </Link>
+          ) : null}
           {listing.caseDetailUrl ? (
             <a
               href={listing.caseDetailUrl}

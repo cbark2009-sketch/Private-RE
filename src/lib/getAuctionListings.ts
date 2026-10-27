@@ -181,6 +181,31 @@ export async function buildListingView(
 }
 
 /**
+ * One case's view-ready listing, from its most recent Listing row - a
+ * postponed auction gets a new row on its new date under the same case
+ * number (see Listing's schema comment), so this follows the case to its
+ * latest date rather than freezing on an old one. Null if the case isn't in
+ * the database or its county is no longer supported. Used by favorites and
+ * the property page, which both start from a case rather than a date.
+ */
+export async function getListingForCase(
+  countySlug: string,
+  caseNumber: string,
+  options?: { liveEstimates?: boolean; skipPermits?: boolean }
+): Promise<AuctionListingView | null> {
+  const county = getCounty(countySlug);
+  if (!county) return null;
+
+  const row = await prisma.listing.findFirst({
+    where: { countySlug, caseNumber },
+    orderBy: { auctionDate: "desc" },
+  });
+  if (!row) return null;
+
+  return buildListingView(row, county, row.auctionDate.toISOString().slice(0, 10), options);
+}
+
+/**
  * Returns the raw DB rows for a (county, date), scraping first if they're
  * missing or stale (>24h old). Exported so callers that only need to *count*
  * or inspect raw fields (e.g. per-day zip counts for the calendar) can reuse
