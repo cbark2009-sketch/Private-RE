@@ -115,7 +115,7 @@ const MAX_DATES_PER_COUNTY = 15;
 // Also skips live RentCast/permit lookups entirely (see getAuctionListings'
 // `options`) - Value Estimate/spread filtering here only "sees" properties
 // that already have a cached RentCast estimate, same honest limitation the
-// homepage's good-deals section already has.
+// favorites page has.
 export async function getListingsAcrossCounties(
   countySlugs: string[],
   zipFilter?: string,

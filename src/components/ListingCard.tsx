@@ -54,7 +54,7 @@ export function ListingCard({
   listing: AuctionListingView;
   /** Show which auction date this card is from - turn on for combined multi-date views. */
   showDate?: boolean;
-  /** Show which county this card is from - for cross-county views like the homepage's good-deals section. */
+  /** Show which county this card is from - for cross-county views like the homepage search and favorites. */
   countyName?: string;
   /** Whether the current user has already favorited this case - controls the star's filled/outline state. */
   isFavorited?: boolean;

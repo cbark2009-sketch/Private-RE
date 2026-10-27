@@ -117,3 +117,16 @@ model ValueEstimateCache {
   failed              Boolean  @default(false)
   fetchedAt           DateTime @default(now())
 }
+
+// Cached address -> map coordinates from the US Census Bureau's free
+// geocoder (src/lib/geocode.ts), for the homepage map. Keyed by the exact
+// propertyAddress string, same as ValueEstimateCache. A house doesn't move,
+// so a successful match is kept forever; a failed one (Census's address
+// database just doesn't know that address) is retried after 30 days.
+model GeocodeCache {
+  address   String   @id
+  lat       Float?
+  lng       Float?
+  failed    Boolean  @default(false)
+  fetchedAt DateTime @default(now())
+}

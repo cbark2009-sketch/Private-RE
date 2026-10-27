@@ -32,7 +32,7 @@ export interface ListingFilters {
   maxBid?: RangeFilter;
   estimate?: RangeFilter;
   assessed?: RangeFilter;
-  /** Only listings where valueEstimate.amount / finalJudgmentAmount is at least this - a user-adjustable version of the ratio the homepage's good-deals section uses. */
+  /** Only listings where valueEstimate.amount / finalJudgmentAmount is at least this - e.g. 1.3 means the estimate is at least 30% above the judgment. */
   minSpreadRatio?: number;
 }
 
@@ -76,8 +76,7 @@ function matchesFilters(view: AuctionListingView, filters: ListingFilters): bool
  * new address is genuinely slow at that scale (a 2-county live search took
  * long enough to need killing before this existed), not just a quota
  * concern. `options.skipPermits` (default false) similarly skips the
- * permit-source lookups for the same kind of broad/bulk search, matching
- * the homepage good-deals section's existing approach.
+ * permit-source lookups for the same kind of broad/bulk search.
  */
 export async function getAuctionListings(
   countySlug: string,

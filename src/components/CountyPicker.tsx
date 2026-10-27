@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { COUNTIES } from "@/lib/counties";
 
 export const MAX_COUNTIES_PER_SEARCH = 4;
@@ -36,7 +36,7 @@ export function CountyPicker({ initialSelected = [] }: { initialSelected?: strin
           {selected.size} / {MAX_COUNTIES_PER_SEARCH}
         </span>
       </div>
-      <div className="mt-1 grid max-h-48 grid-cols-2 gap-x-3 gap-y-1 overflow-y-auto rounded-md border border-border bg-background p-2 sm:grid-cols-3">
+      <div className="mt-1 grid max-h-48 grid-cols-2 gap-x-3 gap-y-1 overflow-y-auto rounded-md border border-border bg-background p-2 sm:grid-cols-3 lg:grid-cols-2">
         {sorted.map((c) => (
           <label key={c.slug} className="flex items-center gap-1.5 text-sm text-foreground">
             <input
@@ -61,13 +61,37 @@ export function CountyPicker({ initialSelected = [] }: { initialSelected?: strin
           Each selected county gets checked live, one at a time - up to {MAX_COUNTIES_PER_SEARCH} at once.
         </p>
       )}
-      <button
-        type="submit"
-        disabled={selected.size === 0 || overCap}
-        className="mt-3 w-full rounded-md bg-accent px-3 py-2 text-sm font-medium text-navy hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        Search {selected.size > 0 ? `${selected.size} count${selected.size === 1 ? "y" : "ies"}` : ""}
-      </button>
     </div>
+  );
+}
+
+/**
+ * The search form's submit button - separate from the picker so it can sit
+ * at the bottom of the form, after the filters, instead of between the
+ * counties and everything else. Counts the form's checked county boxes
+ * itself (via the form's change events) rather than sharing the picker's
+ * state, so the two can live anywhere in the same form.
+ */
+export function CountySearchButton({ initialCount }: { initialCount: number }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const [count, setCount] = useState(initialCount);
+
+  useEffect(() => {
+    const form = ref.current?.form;
+    if (!form) return;
+    const update = () => setCount(form.querySelectorAll('input[name="counties"]:checked').length);
+    form.addEventListener("change", update);
+    return () => form.removeEventListener("change", update);
+  }, []);
+
+  return (
+    <button
+      ref={ref}
+      type="submit"
+      disabled={count === 0 || count > MAX_COUNTIES_PER_SEARCH}
+      className="w-full rounded-md bg-accent px-3 py-2 text-sm font-medium text-navy hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      Search {count > 0 ? `${count} count${count === 1 ? "y" : "ies"}` : ""}
+    </button>
   );
 }
