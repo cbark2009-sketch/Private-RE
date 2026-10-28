@@ -24,21 +24,28 @@ export interface MapPoint {
 }
 
 // Safety cap on how many dots the default map pulls - well past what the
-// database realistically holds for upcoming dates, but keeps a page load
-// bounded if it ever grows.
-const MAX_UPCOMING_POINTS = 3000;
+// whole state realistically has scheduled, but keeps a page load bounded.
+const MAX_UPCOMING_POINTS = 6000;
+// A case the county site no longer lists (cancelled, settled, sold early)
+// never gets its row deleted - its scrapedAt just stops moving. The
+// scheduled refresh (src/lib/refreshCounties.ts) re-confirms every listed
+// case at least daily, so anything not re-confirmed in this long has most
+// likely dropped off the county's calendar and shouldn't be a dot.
+const STALE_AFTER_DAYS = 4;
 
 /**
  * Every upcoming auction already in the database, across all counties -
  * what the homepage map shows before any search. Deliberately reads only
- * what's stored (no scraping, no RentCast), same discipline the old
- * good-deals section had: the database fills in as counties get browsed or
- * searched, so this shows every county anyone has looked at, not literally
- * all of Florida.
+ * what's stored (no scraping, no RentCast): the scheduled statewide refresh
+ * is what keeps the database covering every county.
  */
 export async function getUpcomingMapPoints(): Promise<MapPoint[]> {
   const rows = await prisma.listing.findMany({
-    where: { auctionDate: { gte: new Date(toISODate(new Date())) }, propertyAddress: { not: null } },
+    where: {
+      auctionDate: { gte: new Date(toISODate(new Date())) },
+      propertyAddress: { not: null },
+      scrapedAt: { gte: new Date(Date.now() - STALE_AFTER_DAYS * 24 * 60 * 60 * 1000) },
+    },
     orderBy: { auctionDate: "asc" },
     take: MAX_UPCOMING_POINTS,
   });

@@ -138,6 +138,18 @@ model GeocodeCache {
 // address that RentCast also returns - this app has no use for them. Same
 // 50-calls/month quota as ValueEstimateCache, and a house's specs change
 // even less often than its value, so this is kept 180 days.
+// When the scheduled statewide refresh (src/lib/refreshCounties.ts) last
+// finished each county, so every run picks up the most out-of-date counties
+// first and the whole state stays current across runs - no single run has
+// time to do all 38. lastError records a county that failed (e.g. its site
+// was down) so it waits its turn instead of jumping the queue every run.
+model CountyRefresh {
+  countySlug   String   @id
+  refreshedAt  DateTime
+  listingCount Int      @default(0)
+  lastError    String?
+}
+
 model PropertyDetailsCache {
   address   String   @id
   data      String?

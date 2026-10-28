@@ -1,5 +1,6 @@
 import { getListingsAcrossCounties, DEFAULT_RANGE_DAYS } from "@/lib/getMultiDateListings";
 import { getUpcomingMapPoints, listingsToMapPoints, type MapPoint } from "@/lib/getMapPoints";
+import { getRefreshCoverage, DAYS_AHEAD } from "@/lib/refreshCounties";
 import { getCounty } from "@/lib/counties";
 import { isValidISODate } from "@/lib/dates";
 import { parseListingFilters, buildFilterQueryString, type FilterSearchParams } from "@/lib/filterParams";
@@ -51,8 +52,9 @@ export default async function HomePage({
     }
   }
 
-  // Before a search, the map shows every upcoming auction already saved;
-  // after one, exactly the results listed below it.
+  // Before a search, the map shows every upcoming auction the scheduled
+  // statewide refresh has saved; after one, exactly the results listed
+  // below it.
   const showingResults = hasSearched && !overCap && !error;
   const mapPoints: MapPoint[] = await (showingResults ? listingsToMapPoints(listings) : getUpcomingMapPoints()).catch(
     (err) => {
@@ -60,9 +62,17 @@ export default async function HomePage({
       return [];
     }
   );
+  const coverage = showingResults
+    ? null
+    : await getRefreshCoverage().catch((err) => {
+        console.error("Failed to load refresh coverage:", err);
+        return null;
+      });
   const mapCaption = showingResults
     ? `Showing the ${listings.length === 1 ? "result" : "results"} of your search.`
-    : "Every upcoming auction this site has loaded so far - a county fills in once it's been searched or browsed.";
+    : coverage && coverage.fresh > 0
+      ? `Upcoming auctions over the next ${DAYS_AHEAD} days across ${coverage.fresh === coverage.total ? "all" : `${coverage.fresh} of`} ${coverage.total} counties, refreshed automatically through the day.`
+      : "Every upcoming auction this site has loaded so far - a county fills in once it's been searched or browsed.";
   const mapKey = showingResults
     ? buildFilterQueryString({ zip: zipFilter, filters, counties: requestedSlugs }) + `|${fromValid}|${toValid}`
     : "upcoming";

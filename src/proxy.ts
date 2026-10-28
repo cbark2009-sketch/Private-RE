@@ -8,8 +8,10 @@ import { prisma } from "@/lib/db";
 // page, since a blocked or logged-out person still needs to be able to see
 // *why*. Everything else requires a real account. Replaces the old single
 // shared SITE_PASSWORD Basic Auth (see project history) now that access is
-// per-person.
-const PUBLIC_PATHS = ["/login", "/blocked"];
+// per-person. /api/refresh-counties is the scheduled statewide refresh -
+// Vercel's scheduler can't log in, so that route checks its own secret
+// (CRON_SECRET) instead.
+const PUBLIC_PATHS = ["/login", "/blocked", "/api/refresh-counties"];
 
 export async function proxy(request: NextRequest) {
   // Same convenience as the old SITE_PASSWORD-unset behavior: an unset
