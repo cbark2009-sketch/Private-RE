@@ -2,9 +2,11 @@ import { prisma } from "@/lib/db";
 import { fetchValueEstimate } from "@/lib/rentcast";
 
 const CACHE_MAX_AGE_DAYS = 30;
-// If a lookup failed (bad address, RentCast down, quota exhausted), don't
-// retry on every page view - that just burns more of the monthly quota on
-// something that's probably going to fail again anyway.
+// If RentCast genuinely has no estimate for an address, don't retry on every
+// page view - that just burns more of the monthly quota on something that's
+// going to come back empty again. Account-level failures (inactive
+// subscription, quota used up) and outages are NOT cached here - see the
+// pause in rentcast.ts for how those are handled instead.
 const FAILURE_RETRY_AFTER_DAYS = 7;
 
 export interface MarketEstimate {
@@ -31,14 +33,18 @@ export async function getMarketEstimate(address: string): Promise<MarketEstimate
     console.error(`RentCast lookup threw for "${address}":`, err);
     return null;
   });
+  // Couldn't check at all - fall back to whatever's cached, even if old,
+  // and don't record anything.
+  if (!result) return cached && !cached.failed ? toMarketEstimate(cached) : null;
 
+  const estimate = result.status === "found" ? result.estimate : null;
   await prisma.valueEstimateCache.upsert({
     where: { address },
-    create: { address, failed: !result, ...(result ?? {}) },
-    update: { failed: !result, fetchedAt: new Date(), ...(result ?? {}) },
+    create: { address, failed: !estimate, ...(estimate ?? {}) },
+    update: { failed: !estimate, fetchedAt: new Date(), ...(estimate ?? {}) },
   });
 
-  return result;
+  return estimate;
 }
 
 /**

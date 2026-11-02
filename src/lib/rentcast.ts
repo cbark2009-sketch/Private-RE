@@ -31,6 +31,37 @@ export interface RentCastValueEstimate {
   compCount: number;
 }
 
+// When RentCast rejects the account itself rather than one address - an
+// inactive subscription (403 "billing/subscription-inactive", seen for real
+// 2026-11-02), a bad key, or the month's quota used up - every call fails
+// the same way. Earlier this got cached per address as "no estimate here"
+// for a week, so estimates stayed missing long after the account was fixed.
+// Now those failures are never cached per address; instead all RentCast
+// calls pause for a while (per server instance), so a day page with 30
+// listings doesn't make 30 doomed requests on every view.
+const ACCOUNT_PROBLEM_STATUSES = new Set([401, 402, 403, 429]);
+const PAUSE_AFTER_ACCOUNT_PROBLEM_MS = 30 * 60 * 1000;
+let pausedUntil = 0;
+
+function isPaused(): boolean {
+  return Date.now() < pausedUntil;
+}
+
+/** RentCast's answer for an address it has no data for (or can't parse) - a real, cacheable "no". */
+function isNoDataStatus(status: number): boolean {
+  return status === 404 || status === 400;
+}
+
+async function handleFailure(what: string, address: string, res: Response): Promise<void> {
+  const body = await res.text();
+  if (ACCOUNT_PROBLEM_STATUSES.has(res.status)) {
+    pausedUntil = Date.now() + PAUSE_AFTER_ACCOUNT_PROBLEM_MS;
+    console.error(`RentCast rejected the account (${res.status}) - pausing RentCast lookups for 30 minutes: ${body}`);
+  } else {
+    console.error(`RentCast ${what} failed for "${address}": ${res.status} ${body}`);
+  }
+}
+
 /** The parts of a RentCast /properties record the property page shows - see PropertyDetailsCache in schema.prisma for what's deliberately left out. */
 export interface PropertyDetails {
   propertyType: string | null;
@@ -121,11 +152,13 @@ export async function fetchPropertyRecord(address: string): Promise<PropertyReco
     return null;
   }
 
+  if (isPaused()) return null;
+
   const url = `https://api.rentcast.io/v1/properties?address=${encodeURIComponent(toRentCastAddress(address))}`;
   const res = await fetch(url, { headers: { "X-Api-Key": apiKey } });
-  if (res.status === 404) return { status: "not-found" };
+  if (isNoDataStatus(res.status)) return { status: "not-found" };
   if (!res.ok) {
-    console.error(`RentCast property lookup failed for "${address}": ${res.status} ${await res.text()}`);
+    await handleFailure("property lookup", address, res);
     return null;
   }
 
@@ -176,18 +209,23 @@ export async function fetchPropertyRecord(address: string): Promise<PropertyReco
   };
 }
 
-export async function fetchValueEstimate(address: string): Promise<RentCastValueEstimate | null> {
+export type ValueEstimateResult = { status: "found"; estimate: RentCastValueEstimate } | { status: "not-found" };
+
+/** Same null-means-couldn't-check contract as fetchPropertyRecord - callers must not cache a null as "no estimate for this address". */
+export async function fetchValueEstimate(address: string): Promise<ValueEstimateResult | null> {
   const apiKey = process.env.RENTCAST_API_KEY;
   if (!apiKey) {
     console.warn("RENTCAST_API_KEY not set - skipping value estimate.");
     return null;
   }
+  if (isPaused()) return null;
 
   const url = `https://api.rentcast.io/v1/avm/value?address=${encodeURIComponent(address)}`;
   const res = await fetch(url, { headers: { "X-Api-Key": apiKey } });
 
+  if (isNoDataStatus(res.status)) return { status: "not-found" };
   if (!res.ok) {
-    console.error(`RentCast value estimate failed for "${address}": ${res.status} ${await res.text()}`);
+    await handleFailure("value estimate", address, res);
     return null;
   }
 
@@ -203,11 +241,14 @@ export async function fetchValueEstimate(address: string): Promise<RentCastValue
       : null;
 
   return {
-    price: data.price ?? null,
-    priceRangeLow: data.priceRangeLow ?? null,
-    priceRangeHigh: data.priceRangeHigh ?? null,
-    squareFootage: data.subjectProperty?.squareFootage ?? null,
-    compAvgPricePerSqft,
-    compCount: comps.length,
+    status: "found",
+    estimate: {
+      price: data.price ?? null,
+      priceRangeLow: data.priceRangeLow ?? null,
+      priceRangeHigh: data.priceRangeHigh ?? null,
+      squareFootage: data.subjectProperty?.squareFootage ?? null,
+      compAvgPricePerSqft,
+      compCount: comps.length,
+    },
   };
 }
