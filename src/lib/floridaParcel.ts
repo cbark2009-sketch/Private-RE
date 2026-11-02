@@ -21,10 +21,10 @@ import { parseStreet, sameStreet } from "@/lib/addressMatch";
 // It's queried by location, not address: PHY_ADDR1 isn't indexed, and an
 // address search across ~10.8M parcels took 55s and then errored. A small
 // box around the geocoded point (Census puts that on the street in front
-// of the house, not inside the lot - a plain point query found nothing)
-// returns the handful of nearby parcels, and the right one is picked by
-// matching house number + street name. No match means no record - never a
-// neighbor's.
+// of the house, not inside the lot - a plain point query found nothing),
+// narrowed to parcels with the same house number, returns a handful of
+// candidates, and the right one is picked by matching house number + street
+// name. No match means no record - never a neighbor's.
 
 const SERVICE_URL =
   "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Cadastral/FeatureServer/0/query";
@@ -48,6 +48,8 @@ const CREATE_TABLE_SQL = `CREATE TABLE IF NOT EXISTS "ParcelRecordCache" (
 
 export interface FloridaParcelRecord {
   parcelId: string;
+  /** Florida DOR property use code, 3 digits ("001" single family, "017" one-story office...). Missing on records cached before 2026-11-02. */
+  useCode?: string | null;
   propertyType: string | null;
   livingArea: number | null; // sqft
   yearBuilt: number | null;
@@ -91,8 +93,10 @@ interface ParcelAttributes {
   SALE_MO2?: string;
 }
 
-// Florida DOR property use codes - residential ones spelled out, the rest by category.
-const RESIDENTIAL_USE: Record<string, string> = {
+// Florida DOR property use codes - residential, commercial (010-039) and
+// industrial (040-049) spelled out, since those are what a buyer here cares
+// about; the rest by category.
+const USE_LABELS: Record<string, string> = {
   "000": "Vacant residential land",
   "001": "Single family",
   "002": "Mobile home",
@@ -103,20 +107,77 @@ const RESIDENTIAL_USE: Record<string, string> = {
   "007": "Miscellaneous residential",
   "008": "Multi-family (under 10 units)",
   "009": "Residential common area",
+  "010": "Vacant commercial land",
+  "011": "Store (one story)",
+  "012": "Mixed use (store/office + residential)",
+  "013": "Department store",
+  "014": "Supermarket",
+  "015": "Regional shopping center",
+  "016": "Community shopping center",
+  "017": "Office building (one story)",
+  "018": "Office building (multi-story)",
+  "019": "Professional services building",
+  "020": "Airport, marina or terminal",
+  "021": "Restaurant",
+  "022": "Drive-in restaurant",
+  "023": "Bank or financial office",
+  "024": "Insurance office",
+  "025": "Repair shop",
+  "026": "Service station",
+  "027": "Auto sales or repair",
+  "028": "Parking lot or mobile home park",
+  "029": "Wholesale outlet",
+  "030": "Florist or greenhouse",
+  "031": "Drive-in theater or open stadium",
+  "032": "Theater or auditorium",
+  "033": "Nightclub or bar",
+  "034": "Bowling alley, rink or arena",
+  "035": "Tourist attraction",
+  "036": "Camp",
+  "037": "Race track",
+  "038": "Golf course or driving range",
+  "039": "Hotel or motel",
+  "040": "Vacant industrial land",
+  "041": "Light manufacturing",
+  "042": "Heavy industrial",
+  "043": "Lumber yard or mill",
+  "044": "Packing plant",
+  "045": "Cannery, brewery or winery",
+  "046": "Food processing",
+  "047": "Mineral processing",
+  "048": "Warehouse or distribution",
+  "049": "Open storage or salvage yard",
 };
 
-function propertyUseLabel(code: string | undefined): string | null {
+function normalizeUseCode(code: string | undefined | null): string | null {
+  const trimmed = code?.trim();
+  return trimmed ? trimmed.padStart(3, "0") : null;
+}
+
+function propertyUseLabel(code: string | null): string | null {
   if (!code) return null;
-  const padded = code.trim().padStart(3, "0");
-  if (RESIDENTIAL_USE[padded]) return RESIDENTIAL_USE[padded];
-  const n = Number(padded);
-  if (n >= 10 && n <= 39) return "Commercial";
-  if (n >= 40 && n <= 49) return "Industrial";
+  if (USE_LABELS[code]) return USE_LABELS[code];
+  const n = Number(code);
   if (n >= 50 && n <= 69) return "Agricultural";
   if (n >= 70 && n <= 79) return "Institutional";
   if (n >= 80 && n <= 89) return "Government-owned";
   if (n >= 90 && n <= 99) return "Miscellaneous";
   return null;
+}
+
+/**
+ * Commercial or industrial (DOR codes 010-049) - what the Commercial page
+ * shows. Large apartment complexes (003, 10+ units) are often counted as
+ * commercial real estate too, but the state files them as residential, so
+ * they're left out here. Records cached before use codes were saved only
+ * have the old category label to go on.
+ */
+export function isCommercialRecord(record: FloridaParcelRecord): boolean {
+  if (record.useCode) {
+    const n = Number(record.useCode);
+    return n >= 10 && n <= 49;
+  }
+  return record.propertyType === "Commercial" || record.propertyType === "Industrial";
 }
 
 /** Picks the one parcel whose address is this house - or null if none or several fit (several = condo units we can't tell apart). */
@@ -148,9 +209,11 @@ function toRecord(a: ParcelAttributes): FloridaParcelRecord {
       sales.push({ year, month: Number.isInteger(m) && m >= 1 && m <= 12 ? m : null, price });
     }
   }
+  const useCode = normalizeUseCode(a.DOR_UC);
   return {
     parcelId: a.PARCEL_ID ?? "",
-    propertyType: propertyUseLabel(a.DOR_UC),
+    useCode,
+    propertyType: propertyUseLabel(useCode),
     livingArea: positive(a.TOT_LVG_AR),
     yearBuilt: positive(a.ACT_YR_BLT),
     effectiveYearBuilt: positive(a.EFF_YR_BLT),
@@ -206,7 +269,13 @@ export async function getFloridaParcel(
     const ids = [...new Set([safeId, safeId.replace(/-/g, "")])].map((id) => `'${id}'`).join(",");
     match = pickParcel(street, await queryParcels({ where: `PARCEL_ID IN (${ids})` }));
   }
-  if (!match && coords) {
+  // The house number filter matters as much as the box: in a big condo
+  // complex the box alone catches hundreds of stacked unit parcels - measured
+  // at 55s and then an error for 3531 Inverrary Dr, Lauderhill, versus 5s
+  // with the filter. Digits only, so nothing else can reach the query. No
+  // house number means pickParcel couldn't match anything anyway.
+  const houseNumber = parseStreet(street)?.number;
+  if (!match && coords && houseNumber && /^\d+$/.test(houseNumber)) {
     const d = BOX_HALF_WIDTH_DEGREES;
     match = pickParcel(
       street,
@@ -215,6 +284,7 @@ export async function getFloridaParcel(
         geometryType: "esriGeometryEnvelope",
         inSR: "4326",
         spatialRel: "esriSpatialRelIntersects",
+        where: `PHY_ADDR1 LIKE '${houseNumber} %'`,
       })
     );
   }
@@ -230,4 +300,47 @@ export async function getFloridaParcel(
     update: { data, failed: !record, fetchedAt: new Date() },
   });
   return record;
+}
+
+// SQLite caps how many values one `IN (...)` query can bind.
+const LOOKUP_CHUNK = 500;
+
+/**
+ * Cache-only bulk read - never calls the parcel service. `checked` is every
+ * address that's been looked up at all (found or not), so a caller can say
+ * how much of a set has been covered so far; `records` is the ones found.
+ */
+export async function getCachedParcelRecords(
+  addresses: string[]
+): Promise<{ records: Map<string, FloridaParcelRecord>; checked: Set<string> }> {
+  await ensureTable(CREATE_TABLE_SQL);
+  const records = new Map<string, FloridaParcelRecord>();
+  const checked = new Set<string>();
+  const unique = [...new Set(addresses)];
+  for (let i = 0; i < unique.length; i += LOOKUP_CHUNK) {
+    const rows = await prisma.parcelRecordCache.findMany({ where: { address: { in: unique.slice(i, i + LOOKUP_CHUNK) } } });
+    for (const row of rows) {
+      checked.add(row.address);
+      if (!row.failed && row.data) records.set(row.address, JSON.parse(row.data) as FloridaParcelRecord);
+    }
+  }
+  return { records, checked };
+}
+
+/** Which of these addresses have no usable cached lookup yet (never looked up, or the cached answer has expired). */
+export async function addressesNeedingParcelLookup(addresses: string[]): Promise<string[]> {
+  await ensureTable(CREATE_TABLE_SQL);
+  const fresh = new Set<string>();
+  const unique = [...new Set(addresses)];
+  for (let i = 0; i < unique.length; i += LOOKUP_CHUNK) {
+    const rows = await prisma.parcelRecordCache.findMany({
+      where: { address: { in: unique.slice(i, i + LOOKUP_CHUNK) } },
+      select: { address: true, failed: true, fetchedAt: true },
+    });
+    for (const row of rows) {
+      const ageDays = (Date.now() - row.fetchedAt.getTime()) / (24 * 60 * 60 * 1000);
+      if (ageDays < (row.failed ? NOT_FOUND_RETRY_AFTER_DAYS : CACHE_MAX_AGE_DAYS)) fresh.add(row.address);
+    }
+  }
+  return unique.filter((a) => !fresh.has(a));
 }

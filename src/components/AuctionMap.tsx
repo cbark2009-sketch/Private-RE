@@ -22,7 +22,16 @@ const ADDRESSES_PER_REQUEST = 100;
  * Census geocoder. Give it a `key` that changes per search so a new set of
  * results starts fresh instead of keeping the previous search's state.
  */
-export function AuctionMap({ points, caption }: { points: MapPoint[]; caption: string }) {
+export function AuctionMap({
+  points,
+  caption,
+  heightClassName = "h-[420px] lg:h-[calc(100vh-9rem)] lg:min-h-[520px]",
+}: {
+  points: MapPoint[];
+  caption: string;
+  /** The homepage's default fills the column beside the search form; full-width pages pass something shorter. */
+  heightClassName?: string;
+}) {
   const pending = useMemo(
     () => [...new Set(points.filter((p) => !p.coords && !p.unlocatable).map((p) => p.address))],
     [points]
@@ -80,7 +89,7 @@ export function AuctionMap({ points, caption }: { points: MapPoint[]; caption: s
 
   return (
     <div>
-      <div className="relative h-[420px] overflow-hidden rounded-lg border border-border bg-border lg:h-[calc(100vh-9rem)] lg:min-h-[520px]">
+      <div className={`relative overflow-hidden rounded-lg border border-border bg-border ${heightClassName}`}>
         <AuctionMapCanvas points={placed} settled={!inFlight} />
 
         <div className="pointer-events-none absolute left-3 top-3 z-[1000] rounded-full bg-navy/90 px-3 py-1.5 text-sm font-semibold text-white shadow">

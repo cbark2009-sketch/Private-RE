@@ -53,6 +53,7 @@ export function ListingCard({
   showDate = false,
   countyName,
   isFavorited = false,
+  propertyType,
 }: {
   listing: AuctionListingView;
   /** Show which auction date this card is from - turn on for combined multi-date views. */
@@ -61,6 +62,8 @@ export function ListingCard({
   countyName?: string;
   /** Whether the current user has already favorited this case - controls the star's filled/outline state. */
   isFavorited?: boolean;
+  /** The county's land-use label, shown as a tag - the Commercial page passes it so each card says what kind of property it is. */
+  propertyType?: string | null;
 }) {
   const mapQuery = encodeURIComponent(listing.propertyAddress ?? "");
   const zillowUrl = listing.propertyAddress ? buildZillowUrl(listing.propertyAddress) : null;
@@ -108,6 +111,11 @@ export function ListingCard({
 
       <div className="flex flex-1 flex-col gap-4 p-4">
         <div>
+          {propertyType ? (
+            <span className="mb-1 mr-1 inline-block rounded-full border border-accent/40 bg-accent-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">
+              {propertyType}
+            </span>
+          ) : null}
           {isLikelyHoaOrLienCase(listing.caseNumber) ? (
             <span className="mb-1 inline-block rounded-full border border-border bg-background px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
               Likely HOA/Lien Case

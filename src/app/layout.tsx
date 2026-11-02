@@ -70,6 +70,9 @@ export default async function RootLayout({
                   <a href="/favorites" className="text-xs text-white/60 hover:text-white hover:underline">
                     ★ Favorites
                   </a>
+                  <a href="/commercial" className="text-xs text-white/60 hover:text-white hover:underline">
+                    Commercial
+                  </a>
                   {currentUser.isOwner ? (
                     <a href="/ceo" className="text-xs text-white/60 hover:text-white hover:underline">
                       CEO

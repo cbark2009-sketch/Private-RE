@@ -21,6 +21,8 @@ export interface MapPoint {
   coords: Coordinates | null;
   /** Census already tried and couldn't match this address recently - the map shouldn't ask again. */
   unlocatable: boolean;
+  /** The county's land-use label ("Office building (one story)") when known - shown on the Commercial page's dots. */
+  propertyType?: string | null;
 }
 
 // Safety cap on how many dots the default map pulls - well past what the
@@ -34,12 +36,13 @@ const MAX_UPCOMING_POINTS = 6000;
 const STALE_AFTER_DAYS = 4;
 
 /**
- * Every upcoming auction already in the database, across all counties -
- * what the homepage map shows before any search. Deliberately reads only
- * what's stored (no scraping, no RentCast): the scheduled statewide refresh
- * is what keeps the database covering every county.
+ * Every upcoming, still-listed auction with an address, one per property
+ * (a rescheduled case can leave more than one upcoming row for the same
+ * property - this keeps its nearest date), soonest first. Reads only what's
+ * stored - the scheduled statewide refresh is what keeps it covering every
+ * county. Shared by the homepage map and the Commercial page.
  */
-export async function getUpcomingMapPoints(): Promise<MapPoint[]> {
+export async function getUpcomingRows() {
   const rows = await prisma.listing.findMany({
     where: {
       auctionDate: { gte: new Date(toISODate(new Date())) },
@@ -50,13 +53,17 @@ export async function getUpcomingMapPoints(): Promise<MapPoint[]> {
     take: MAX_UPCOMING_POINTS,
   });
 
-  // A rescheduled case can leave more than one upcoming row for the same
-  // property - one dot, for its nearest date.
   const byAddress = new Map<string, (typeof rows)[number]>();
   for (const row of rows) {
     if (!byAddress.has(row.propertyAddress!) && getCounty(row.countySlug)) byAddress.set(row.propertyAddress!, row);
   }
-  const unique = [...byAddress.values()];
+  return [...byAddress.values()];
+}
+
+/** Every upcoming auction as a map dot - what the homepage map shows before any search. Never scrapes or spends RentCast quota. */
+export async function getUpcomingMapPoints(): Promise<MapPoint[]> {
+  const unique = await getUpcomingRows();
+  const byAddress = new Map(unique.map((row) => [row.propertyAddress!, row]));
 
   const estimates = await prisma.valueEstimateCache.findMany({
     where: { address: { in: [...byAddress.keys()] }, failed: false },

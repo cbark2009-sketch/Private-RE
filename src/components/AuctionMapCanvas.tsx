@@ -105,6 +105,7 @@ export function AuctionMapCanvas({ points, settled }: { points: PlacedPoint[]; s
               <span style={{ color: "#63677e" }}>
                 {p.countyName} County · {formatShortDate(p.auctionDate)}
               </span>
+              {p.propertyType ? <span className="font-semibold">{p.propertyType}</span> : null}
               {p.likelyHoa ? (
                 <span className="font-semibold uppercase tracking-wide" style={{ color: DOT_COLORS.hoa }}>
                   Likely HOA/Lien case
