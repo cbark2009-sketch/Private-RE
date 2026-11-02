@@ -150,6 +150,27 @@ model CountyRefresh {
   lastError    String?
 }
 
+// Cached Florida tax-roll record for the property page (living area, year
+// built, lot, use type, appraiser's market value, recent sales - see
+// src/lib/floridaParcel.ts). Free public data, but from an unofficial copy
+// of the state roll, so it's cached to lean on that copy as little as
+// possible. `data` is our own JSON, without owner name/address.
+model ParcelRecordCache {
+  address   String   @id
+  data      String?
+  failed    Boolean  @default(false)
+  fetchedAt DateTime @default(now())
+}
+
+// Cached facts read from a house's public Zillow page (bedrooms, bathrooms,
+// Zestimate - see src/lib/zillowFacts.ts), keyed by property address.
+model ZillowCache {
+  address   String   @id
+  data      String?
+  failed    Boolean  @default(false)
+  fetchedAt DateTime @default(now())
+}
+
 model PropertyDetailsCache {
   address   String   @id
   data      String?

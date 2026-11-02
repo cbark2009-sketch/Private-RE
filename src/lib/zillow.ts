@@ -1,10 +1,11 @@
 /**
  * Builds a link to Zillow's own page for an address, so a user can compare
- * Zillow's estimate against this app's own. This is just a link out - never
- * scrapes Zillow's data (their ToS actively prohibits and enforces against
- * that, unlike the public court-record data this app is built on - see
- * project history for why RentCast was chosen over scraping Zillow/Redfin).
- * Verified this URL shape against a real address before using it.
+ * Zillow's estimate against this app's own. Verified this URL shape against
+ * a real address before using it - it redirects to the house's /homedetails/
+ * page. Also the page zillowFacts.ts reads beds/baths from, which goes
+ * against Zillow's terms of service: the owner decided on 2026-11-02 to
+ * accept that risk since this site is for his own use (RentCast, the
+ * licensed source chosen originally, stopped working for free).
  */
 export function buildZillowUrl(propertyAddress: string): string | null {
   // Stored format is "STREET, CITY, ZIP" or "STREET, CITY, FL- ZIP"

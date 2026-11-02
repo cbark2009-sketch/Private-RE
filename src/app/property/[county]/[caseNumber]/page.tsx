@@ -2,7 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getListingForCase } from "@/lib/getAuctionListings";
 import { getPropertyDetails, type PropertyDetails } from "@/lib/propertyDetails";
-import { geocodeAddresses } from "@/lib/geocode";
+import { getFloridaParcel, type FloridaParcelRecord } from "@/lib/floridaParcel";
+import { getZillowFacts, type ZillowFacts } from "@/lib/zillowFacts";
+import { geocodeAddresses, type Coordinates } from "@/lib/geocode";
 import { formatMoney } from "@/lib/format";
 import { formatDisplayDate } from "@/lib/dates";
 import { buildZillowUrl } from "@/lib/zillow";
@@ -60,46 +62,105 @@ function yesNo(value: boolean | null, typeLabel?: string | null): string | null 
   return typeLabel ? `Yes (${typeLabel})` : "Yes";
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+interface HouseSources {
+  /** Florida's tax roll - free, every county, the main source. */
+  fl: FloridaParcelRecord | null;
+  /** Zillow's page - the only free source of bedrooms/bathrooms. */
+  zillow: ZillowFacts | null;
+  /** RentCast - optional extras (roof, heating, taxes...) when its subscription is active. */
+  rentcast: PropertyDetails | null;
+}
+
+function count(n: number | null): string | null {
+  return n != null ? String(n) : null;
+}
+
+/** Every recorded sale from any source, newest first, as display strings. */
+function salesList({ fl, rentcast }: HouseSources): { when: string; sortKey: string; price: number | null }[] {
+  const sales = [
+    ...(fl?.sales ?? []).map((s) => ({
+      when: s.month ? `${MONTHS[s.month - 1]} ${s.year}` : String(s.year),
+      sortKey: `${s.year}-${String(s.month ?? 0).padStart(2, "0")}`,
+      price: s.price as number | null,
+    })),
+    ...(rentcast?.saleHistory ?? []).map((s) => ({ when: formatDate(s.date), sortKey: s.date.slice(0, 7), price: s.price })),
+  ];
+  // The same sale can come from both sources - keep one per month.
+  const byMonth = new Map(sales.map((s) => [s.sortKey, s]));
+  return [...byMonth.values()].sort((a, b) => b.sortKey.localeCompare(a.sortKey));
+}
+
 /**
  * Beds/baths/sqft/lot/year/type always show (as "Unknown" when missing) so
  * the basics are in the same place on every house; the rest only appear
- * when the record actually has them, so a sparse record doesn't turn into
- * a wall of "Unknown".
+ * when a source actually has them, so a sparse record doesn't turn into a
+ * wall of "Unknown". Each fact prefers the county's own record, then
+ * Zillow, then RentCast.
  */
-function houseFacts(d: PropertyDetails): { label: string; value: string | null; always?: boolean }[] {
+function houseFacts(sources: HouseSources): { label: string; value: string | null; always?: boolean }[] {
+  const { fl, zillow: z, rentcast: rc } = sources;
+  const livingArea = fl?.livingArea ?? z?.livingArea ?? rc?.squareFootage ?? null;
+  const lotSize = fl?.lotSize ?? rc?.lotSize ?? null;
+  const updatedYear =
+    fl?.effectiveYearBuilt && fl.yearBuilt && fl.effectiveYearBuilt > fl.yearBuilt ? fl.effectiveYearBuilt : null;
+  const garageSpaces = z?.garageSpaces ?? rc?.garageSpaces ?? null;
+  const hoaFee = z?.hoaFee ?? rc?.hoaFee ?? null;
+  const lastSale = salesList(sources)[0];
+
   return [
-    { label: "Bedrooms", value: d.bedrooms != null ? String(d.bedrooms) : null, always: true },
-    { label: "Bathrooms", value: d.bathrooms != null ? String(d.bathrooms) : null, always: true },
-    { label: "Living area", value: d.squareFootage != null ? `${d.squareFootage.toLocaleString()} sq ft` : null, always: true },
-    { label: "Lot size", value: d.lotSize != null ? formatLot(d.lotSize) : null, always: true },
-    { label: "Year built", value: d.yearBuilt != null ? String(d.yearBuilt) : null, always: true },
-    { label: "Property type", value: d.propertyType, always: true },
-    { label: "Stories", value: d.floorCount != null ? String(d.floorCount) : null },
+    { label: "Bedrooms", value: count(z?.bedrooms ?? rc?.bedrooms ?? null), always: true },
+    { label: "Bathrooms", value: count(z?.bathrooms ?? rc?.bathrooms ?? null), always: true },
+    { label: "Living area", value: livingArea != null ? `${livingArea.toLocaleString()} sq ft` : null, always: true },
+    { label: "Lot size", value: lotSize != null ? formatLot(lotSize) : null, always: true },
+    { label: "Year built", value: count(fl?.yearBuilt ?? z?.yearBuilt ?? rc?.yearBuilt ?? null), always: true },
+    { label: "Property type", value: fl?.propertyType ?? z?.homeType ?? rc?.propertyType ?? null, always: true },
+    // The appraiser's "effective" year - later than when it was built means it's been substantially updated.
+    { label: "Updated around", value: count(updatedYear) },
     {
-      label: "Garage",
-      value: d.garage === false ? "None" : d.garageSpaces ? `${d.garageSpaces}-car` : d.garage ? "Yes" : null,
+      label: "County market value",
+      value: fl?.marketValue != null ? `${formatMoney(fl.marketValue)}${fl.rollYear ? ` (${fl.rollYear})` : ""}` : null,
     },
-    { label: "Pool", value: yesNo(d.pool, d.poolType) },
-    { label: "Cooling", value: yesNo(d.cooling, d.coolingType) },
-    { label: "Heating", value: yesNo(d.heating, d.heatingType) },
-    { label: "Fireplace", value: yesNo(d.fireplace) },
-    { label: "Roof", value: d.roofType },
-    { label: "Exterior", value: d.exteriorType },
-    { label: "HOA fee", value: d.hoaFee != null ? `${formatMoney(d.hoaFee)}/month` : null },
+    { label: "Land value", value: fl?.landValue != null ? formatMoney(fl.landValue) : null },
     {
-      label: "Property taxes",
-      value: d.latestTax ? `${formatMoney(d.latestTax.total)}/yr${d.latestTax.year ? ` (${d.latestTax.year})` : ""}` : null,
+      label: "Extras (pool, dock, etc.)",
+      value: fl?.extraFeaturesValue != null ? `${formatMoney(fl.extraFeaturesValue)} value` : null,
     },
     {
-      label: "Last sold",
+      label: "Buildings / units",
       value:
-        d.lastSalePrice != null || d.lastSaleDate
-          ? [formatMoney(d.lastSalePrice), d.lastSaleDate ? formatDate(d.lastSaleDate) : null].filter(Boolean).join(" · ")
+        fl && ((fl.buildings ?? 0) > 1 || (fl.residentialUnits ?? 0) > 1)
+          ? `${fl.buildings ?? "?"} / ${fl.residentialUnits ?? "?"}`
           : null,
     },
-    { label: "Owner lives there", value: d.ownerOccupied == null ? null : d.ownerOccupied ? "Yes" : "No" },
-    { label: "Subdivision", value: d.subdivision },
-    { label: "Zoning", value: d.zoning },
+    { label: "Stories", value: count(z?.stories ?? rc?.floorCount ?? null) },
+    {
+      label: "Garage",
+      value: garageSpaces ? `${garageSpaces}-car` : rc?.garage === false ? "None" : rc?.garage ? "Yes" : null,
+    },
+    { label: "Pool", value: yesNo(z?.pool ?? rc?.pool ?? null, rc?.poolType) },
+    { label: "Cooling", value: rc ? yesNo(rc.cooling, rc.coolingType) : null },
+    { label: "Heating", value: rc ? yesNo(rc.heating, rc.heatingType) : null },
+    { label: "Fireplace", value: rc ? yesNo(rc.fireplace) : null },
+    { label: "Roof", value: rc?.roofType ?? null },
+    { label: "Exterior", value: rc?.exteriorType ?? null },
+    { label: "HOA fee", value: hoaFee != null ? `${formatMoney(hoaFee)}/month` : null },
+    { label: "Zillow rent estimate", value: z?.rentZestimate != null ? `${formatMoney(z.rentZestimate)}/month` : null },
+    {
+      label: "Property taxes",
+      value: rc?.latestTax
+        ? `${formatMoney(rc.latestTax.total)}/yr${rc.latestTax.year ? ` (${rc.latestTax.year})` : ""}`
+        : null,
+    },
+    { label: "Last sold", value: lastSale ? `${formatMoney(lastSale.price)} · ${lastSale.when}` : null },
+    // A homestead exemption is only granted for the owner's primary residence - so someone very likely lives there.
+    {
+      label: "Owner lives there",
+      value: fl ? (fl.homestead ? "Yes (homestead)" : "No homestead") : rc?.ownerOccupied == null ? null : rc.ownerOccupied ? "Yes" : "No",
+    },
+    { label: "Subdivision", value: rc?.subdivision ?? null },
+    { label: "Zoning", value: rc?.zoning ?? null },
   ];
 }
 
@@ -118,22 +179,41 @@ export default async function PropertyPage({ params }: { params: Params }) {
   if (!listing || !listing.propertyAddress) notFound();
   const address = listing.propertyAddress;
 
-  const [details, coordsByAddress, favoriteKeys] = await Promise.all([
+  // Every source fails soft - a house page with some facts beats an error page.
+  const coords =
+    (
+      await geocodeAddresses([address]).catch((err) => {
+        console.error(`Geocoding failed for "${address}":`, err);
+        return new Map<string, Coordinates | null>();
+      })
+    ).get(address) ?? null;
+  const [fl, zillow, rentcast, favoriteKeys] = await Promise.all([
+    getFloridaParcel(address, coords, listing.parcelId).catch((err) => {
+      console.error(`Florida parcel lookup failed for "${address}":`, err);
+      return null;
+    }),
+    getZillowFacts(address).catch((err) => {
+      console.error(`Zillow facts failed for "${address}":`, err);
+      return null;
+    }),
     getPropertyDetails(address).catch((err) => {
       console.error(`Property details failed for "${address}":`, err);
       return null;
     }),
-    geocodeAddresses([address]).catch((err) => {
-      console.error(`Geocoding failed for "${address}":`, err);
-      return new Map();
-    }),
     getCurrentUserId().then(getFavoriteKeySet),
   ]);
-  const coords = coordsByAddress.get(address) ?? null;
+  const sources: HouseSources = { fl, zillow, rentcast };
+  const hasHouseData = Boolean(fl || zillow || rentcast);
+  const sales = salesList(sources);
+  const sourceNames = [
+    fl ? `Florida's ${fl.rollYear ? `${fl.rollYear} ` : ""}property tax roll` : null,
+    zillow ? "Zillow (bedrooms, bathrooms, Zestimate)" : null,
+    rentcast ? "RentCast" : null,
+  ].filter(Boolean);
   const favorited = isFavorited(favoriteKeys, listing.countySlug, listing.caseNumber);
 
   const mapQuery = encodeURIComponent(address);
-  const zillowUrl = buildZillowUrl(address);
+  const zillowUrl = zillow?.url ?? buildZillowUrl(address);
   const value = listing.valueEstimate;
   const ratio = value.amount != null && listing.finalJudgmentAmount ? value.amount / listing.finalJudgmentAmount : null;
 
@@ -201,18 +281,18 @@ export default async function PropertyPage({ params }: { params: Params }) {
 
       <section className="mt-8">
         <h2 className="text-lg font-semibold text-foreground">About the house</h2>
-        {details ? (
+        {hasHouseData ? (
           <>
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-              {houseFacts(details)
+              {houseFacts(sources)
                 .filter((f) => f.always || f.value != null)
                 .map((f) => (
                   <Fact key={f.label} label={f.label} value={f.value} />
                 ))}
             </div>
             <p className="mt-2 text-[11px] text-muted">
-              From public property records (via RentCast). Records can be out of date or miss recent
-              additions - confirm with the property appraiser before bidding.
+              From {sourceNames.join(", ")}. Records can be out of date or miss recent additions -
+              confirm with the property appraiser before bidding.
             </p>
           </>
         ) : (
@@ -240,6 +320,14 @@ export default async function PropertyPage({ params }: { params: Params }) {
             note={value.note}
           />
           <Stat label="Assessed (Tax) Value" value={formatMoney(listing.assessedValue)} badge="fact" />
+          {zillow?.zestimate != null ? (
+            <Stat
+              label="Zillow Zestimate"
+              value={formatMoney(zillow.zestimate)}
+              badge="estimate"
+              note="Zillow's own automated estimate, read from its page for this house - a second opinion next to the estimate above."
+            />
+          ) : null}
         </div>
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
           {value.rangeLow != null && value.rangeHigh != null ? (
@@ -253,16 +341,19 @@ export default async function PropertyPage({ params }: { params: Params }) {
             </span>
           ) : null}
           {ratio != null ? <span>Value estimate is {ratio.toFixed(2)}× the judgment</span> : null}
+          {zillow?.zestimate != null && listing.finalJudgmentAmount ? (
+            <span>Zestimate is {(zillow.zestimate / listing.finalJudgmentAmount).toFixed(2)}× the judgment</span>
+          ) : null}
         </div>
       </section>
 
-      {details?.saleHistory.length ? (
+      {sales.length ? (
         <section className="mt-8">
           <h2 className="text-lg font-semibold text-foreground">Sale history</h2>
           <ul className="mt-3 divide-y divide-border rounded-lg border border-border bg-surface text-sm">
-            {details.saleHistory.map((s) => (
-              <li key={s.date} className="flex justify-between gap-4 px-3 py-2">
-                <span className="text-muted">{formatDate(s.date)}</span>
+            {sales.map((s) => (
+              <li key={s.sortKey} className="flex justify-between gap-4 px-3 py-2">
+                <span className="text-muted">{s.when}</span>
                 <span className="font-medium text-foreground tabular-nums">{formatMoney(s.price)}</span>
               </li>
             ))}
