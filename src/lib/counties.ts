@@ -9,6 +9,14 @@
 // which means they're most likely on a different vendor entirely. Adding
 // one of those would mean identifying and integrating its specific
 // platform, not just adding a row here.
+//
+// Re-checked 2026-11-03 by requesting <county>.realforeclose.com directly
+// for all 29 missing counties: Brevard had moved its sales online here on
+// 2026-09-01 (added below, scraper works unchanged). Lake, Osceola and
+// Suwannee have pages on the platform but nothing scheduled Sep 2026 -
+// Jan 2027, so they sell elsewhere now (Lake posts sales on its clerk's own
+// calendar). Every other missing county's host just redirects to
+// realauction.com. Collier and Hernando hold sales in person.
 export interface County {
   name: string;
   slug: string;
@@ -19,6 +27,7 @@ export const COUNTIES: County[] = [
   { name: "Alachua", slug: "alachua", host: "alachua.realforeclose.com" },
   { name: "Baker", slug: "baker", host: "baker.realforeclose.com" },
   { name: "Bay", slug: "bay", host: "bay.realforeclose.com" },
+  { name: "Brevard", slug: "brevard", host: "brevard.realforeclose.com" },
   { name: "Broward", slug: "broward", host: "broward.realforeclose.com" },
   { name: "Calhoun", slug: "calhoun", host: "calhoun.realforeclose.com" },
   { name: "Charlotte", slug: "charlotte", host: "charlotte.realforeclose.com" },
