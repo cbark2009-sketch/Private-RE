@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/db";
 import { ensureTable } from "@/lib/ensureTable";
-import { COUNTIES } from "@/lib/counties";
+import { COUNTIES, type County } from "@/lib/counties";
+import { TAX_DEED_COUNTIES, taxDeedKey } from "@/lib/taxDeedCounties";
+import { getTaxDeedActiveDatesInRange, getOrRefreshTaxDeedRows } from "@/lib/taxDeeds";
 import { addDays, toISODate } from "@/lib/dates";
 import { getActiveDatesInRange } from "@/lib/getMultiDateListings";
 import { getOrRefreshRows } from "@/lib/getAuctionListings";
@@ -9,7 +11,9 @@ import { getFloridaParcel, addressesNeedingParcelLookup } from "@/lib/floridaPar
 
 // Keeps every supported county's upcoming auctions in the database so the
 // homepage map covers the whole state, not just counties someone happened
-// to search. Run on a schedule by /api/refresh-counties (see vercel.json).
+// to search. Run on a schedule by /api/refresh-counties for foreclosures and
+// /api/refresh-tax-deeds for tax deeds (see vercel.json) - the same loop for
+// both, each with its own schedule and its own progress per county.
 //
 // Vercel's Hobby plan caps each scheduled run at 5 minutes and each
 // schedule at once a day. Measured on the first full run (local database,
@@ -51,7 +55,45 @@ export interface RefreshSummary {
   elapsedSeconds: number;
 }
 
-export async function refreshCounties({ budgetMs }: { budgetMs: number }): Promise<RefreshSummary> {
+/**
+ * One kind of auction the refresh can keep current - foreclosures (each
+ * county's RealForeclose site) or tax deeds (its RealTaxDeed site). Both go
+ * through the same loop below; they're separate scheduled routes so each
+ * gets its own 5-minute window.
+ */
+interface RefreshSource {
+  counties: County[];
+  /** This county's row in CountyRefresh - the plain slug for foreclosures, taxDeedKey(slug) for tax deeds, so the two don't share progress. */
+  key: (slug: string) => string;
+  activeDates: (county: County, from: string, to: string) => Promise<string[]>;
+  rows: (county: County, date: string) => Promise<{ propertyAddress: string | null; parcelId: string | null }[]>;
+}
+
+const FORECLOSURES: RefreshSource = {
+  counties: COUNTIES,
+  key: (slug) => slug,
+  activeDates: (county, from, to) => getActiveDatesInRange(county.slug, from, to),
+  rows: getOrRefreshRows,
+};
+
+const TAX_DEEDS: RefreshSource = {
+  counties: TAX_DEED_COUNTIES,
+  key: taxDeedKey,
+  activeDates: getTaxDeedActiveDatesInRange,
+  rows: getOrRefreshTaxDeedRows,
+};
+
+/** Foreclosure auctions, for the homepage map and the Commercial page - /api/refresh-counties. */
+export function refreshCounties(options: { budgetMs: number }): Promise<RefreshSummary> {
+  return runRefresh(FORECLOSURES, options);
+}
+
+/** Tax deed sales, for the Tax Deeds section - /api/refresh-tax-deeds. */
+export function refreshTaxDeedCounties(options: { budgetMs: number }): Promise<RefreshSummary> {
+  return runRefresh(TAX_DEEDS, options);
+}
+
+async function runRefresh(source: RefreshSource, { budgetMs }: { budgetMs: number }): Promise<RefreshSummary> {
   const started = Date.now();
   const outOfTime = () => Date.now() - started > budgetMs;
   await ensureTable(CREATE_TABLE_SQL);
@@ -59,10 +101,10 @@ export async function refreshCounties({ budgetMs }: { budgetMs: number }): Promi
   const records = await prisma.countyRefresh.findMany();
   const lastRefreshed = new Map(records.map((r) => [r.countySlug, r.refreshedAt.getTime()]));
   // Never-refreshed counties first, then oldest first.
-  const due = COUNTIES.filter((c) => {
-    const last = lastRefreshed.get(c.slug);
+  const due = source.counties.filter((c) => {
+    const last = lastRefreshed.get(source.key(c.slug));
     return last == null || Date.now() - last > REFRESH_EVERY_HOURS * 60 * 60 * 1000;
-  }).sort((a, b) => (lastRefreshed.get(a.slug) ?? 0) - (lastRefreshed.get(b.slug) ?? 0));
+  }).sort((a, b) => (lastRefreshed.get(source.key(a.slug)) ?? 0) - (lastRefreshed.get(source.key(b.slug)) ?? 0));
 
   const from = toISODate(new Date());
   const to = addDays(from, DAYS_AHEAD);
@@ -72,7 +114,7 @@ export async function refreshCounties({ budgetMs }: { budgetMs: number }): Promi
   for (const county of due) {
     if (outOfTime()) break;
 
-    const dates = await getActiveDatesInRange(county.slug, from, to);
+    const dates = await source.activeDates(county, from, to);
     // address -> scraped parcel ID (null when the county site didn't show one)
     const addresses = new Map<string, string | null>();
     let listings = 0;
@@ -87,7 +129,7 @@ export async function refreshCounties({ budgetMs }: { budgetMs: number }): Promi
       try {
         // Reuses the normal scrape-and-cache path: a date already scraped in
         // the last 24h (e.g. someone just browsed it) costs no requests.
-        const rows = await getOrRefreshRows(county, date);
+        const rows = await source.rows(county, date);
         listings += rows.length;
         for (const row of rows) if (row.propertyAddress) addresses.set(row.propertyAddress, row.parcelId);
       } catch (err) {
@@ -139,8 +181,8 @@ export async function refreshCounties({ budgetMs }: { budgetMs: number }): Promi
     // that costs almost nothing.
     if (!finished) break;
     await prisma.countyRefresh.upsert({
-      where: { countySlug: county.slug },
-      create: { countySlug: county.slug, refreshedAt: new Date(), listingCount: listings, lastError: error ?? null },
+      where: { countySlug: source.key(county.slug) },
+      create: { countySlug: source.key(county.slug), refreshedAt: new Date(), listingCount: listings, lastError: error ?? null },
       update: { refreshedAt: new Date(), listingCount: listings, lastError: error ?? null },
     });
     completed.add(county.slug);
@@ -153,11 +195,15 @@ export async function refreshCounties({ budgetMs }: { budgetMs: number }): Promi
   };
 }
 
-/** How many counties the scheduled refresh has covered recently - for the map's caption. */
-export async function getRefreshCoverage(): Promise<{ fresh: number; total: number }> {
+/** How many counties the scheduled refresh has covered recently - for a map's caption. Foreclosures unless asked for tax deeds. */
+export async function getRefreshCoverage(kind: "foreclosures" | "taxDeeds" = "foreclosures"): Promise<{ fresh: number; total: number }> {
   await ensureTable(CREATE_TABLE_SQL);
+  const source = kind === "taxDeeds" ? TAX_DEEDS : FORECLOSURES;
   const fresh = await prisma.countyRefresh.count({
-    where: { refreshedAt: { gte: new Date(Date.now() - 48 * 60 * 60 * 1000) } },
+    where: {
+      countySlug: { in: source.counties.map((c) => source.key(c.slug)) },
+      refreshedAt: { gte: new Date(Date.now() - 48 * 60 * 60 * 1000) },
+    },
   });
-  return { fresh, total: COUNTIES.length };
+  return { fresh, total: source.counties.length };
 }

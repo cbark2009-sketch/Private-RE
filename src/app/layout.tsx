@@ -73,6 +73,9 @@ export default async function RootLayout({
                   <a href="/commercial" className="text-xs text-white/60 hover:text-white hover:underline">
                     Commercial
                   </a>
+                  <a href="/tax-deeds" className="text-xs text-white/60 hover:text-white hover:underline">
+                    Tax Deeds
+                  </a>
                   {currentUser.isOwner ? (
                     <a href="/ceo" className="text-xs text-white/60 hover:text-white hover:underline">
                       CEO

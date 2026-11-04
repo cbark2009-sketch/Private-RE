@@ -9,8 +9,9 @@ export const maxDuration = 60;
 /**
  * Called by the homepage map (src/components/AuctionMap.tsx) for whichever
  * of its dots aren't geocoded yet, so the page itself never waits on Census.
- * Only geocodes addresses that are actually listings in our database - this
- * isn't a general-purpose geocoder for anything a client sends.
+ * Only geocodes addresses that are actually foreclosure listings or tax deed
+ * sales in our database - this isn't a general-purpose geocoder for
+ * anything a client sends.
  */
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => null)) as { addresses?: unknown } | null;
@@ -21,12 +22,22 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: `Send 1-${MAX_ADDRESSES_PER_REQUEST} addresses.` }, { status: 400 });
   }
 
-  const known = await prisma.listing.findMany({
-    where: { propertyAddress: { in: requested } },
-    select: { propertyAddress: true },
-    distinct: ["propertyAddress"],
-  });
-  const addresses = known.map((k) => k.propertyAddress!);
+  // Foreclosure listings and tax deed sales both have map dots.
+  const [knownListings, knownTaxDeeds] = await Promise.all([
+    prisma.listing.findMany({
+      where: { propertyAddress: { in: requested } },
+      select: { propertyAddress: true },
+      distinct: ["propertyAddress"],
+    }),
+    prisma.taxDeedListing
+      .findMany({
+        where: { propertyAddress: { in: requested } },
+        select: { propertyAddress: true },
+        distinct: ["propertyAddress"],
+      })
+      .catch(() => []), // table not created yet on a fresh database
+  ]);
+  const addresses = [...new Set([...knownListings, ...knownTaxDeeds].map((k) => k.propertyAddress!))];
   if (addresses.length === 0) return NextResponse.json({ results: {} });
 
   try {

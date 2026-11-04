@@ -4,6 +4,10 @@
     { "path": "/api/refresh-counties", "schedule": "0 4 * * *" },
     { "path": "/api/refresh-counties", "schedule": "0 10 * * *" },
     { "path": "/api/refresh-counties", "schedule": "0 16 * * *" },
-    { "path": "/api/refresh-counties", "schedule": "0 22 * * *" }
+    { "path": "/api/refresh-counties", "schedule": "0 22 * * *" },
+    { "path": "/api/refresh-tax-deeds", "schedule": "0 1 * * *" },
+    { "path": "/api/refresh-tax-deeds", "schedule": "0 7 * * *" },
+    { "path": "/api/refresh-tax-deeds", "schedule": "0 13 * * *" },
+    { "path": "/api/refresh-tax-deeds", "schedule": "0 19 * * *" }
   ]
 }

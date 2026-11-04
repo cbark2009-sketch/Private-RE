@@ -49,6 +49,11 @@ function FitToPoints({ points, settled }: { points: PlacedPoint[]; settled: bool
     if (points.length === 0 || userMoved.current) return;
     if (fittedOnce.current && !settled) return;
     programmatic.current = true;
+    // Re-measure first: if the container was still laying out when the map
+    // first measured itself (seen once on a slow first load), fitting to a
+    // zero-size map zooms all the way in on the middle of the dots - which
+    // for a statewide set is the Gulf of Mexico.
+    map.invalidateSize();
     map.fitBounds(
       points.map((p) => [p.coords.lat, p.coords.lng]),
       { padding: [30, 30], maxZoom: 12 }
@@ -96,7 +101,7 @@ export function AuctionMapCanvas({ points, settled }: { points: PlacedPoint[]; s
           }}
           // Clicking a dot goes straight to that house's own page; hovering
           // shows a quick preview first so you can tell dots apart.
-          eventHandlers={{ click: () => router.push(propertyHref(p.countySlug, p.caseNumber)) }}
+          eventHandlers={{ click: () => router.push(p.href ?? propertyHref(p.countySlug, p.caseNumber)) }}
         >
           {/* Leaflet tooltips are always white, so colors are fixed here rather than following the site's dark mode. */}
           <Tooltip direction="top" offset={[0, -6]}>
@@ -111,7 +116,9 @@ export function AuctionMapCanvas({ points, settled }: { points: PlacedPoint[]; s
                   Likely HOA/Lien case
                 </span>
               ) : null}
-              <span>Final judgment: {formatMoney(p.judgment)}</span>
+              <span>
+                {p.amountLabel ?? "Final judgment"}: {formatMoney(p.judgment)}
+              </span>
               {p.valueEstimate != null ? <span>Value estimate: {formatMoney(p.valueEstimate)}</span> : null}
               <span className="mt-0.5 font-semibold" style={{ color: DOT_COLORS.foreclosure }}>
                 Click for full details

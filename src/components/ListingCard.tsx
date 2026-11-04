@@ -16,31 +16,34 @@ function EstimateBadge() {
   );
 }
 
-function FactBadge() {
+function FactBadge({ text }: { text: string }) {
   return (
     <span className="inline-block rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">
-      From case record
+      {text}
     </span>
   );
 }
 
-/** One labeled number with a "From case record" / "Estimate" badge - also used by the property page. */
+/** One labeled number with a "From case record" / "Estimate" badge - also used by the property pages and tax deed cards. */
 export function Stat({
   label,
   value,
   badge,
   note,
+  factLabel = "From case record",
 }: {
   label: string;
   value: string;
   badge: "fact" | "estimate";
   note?: string;
+  /** What a "fact" badge says - tax deeds come from the county's sale listing, not a court case record. */
+  factLabel?: string;
 }) {
   return (
     <div className="flex flex-col gap-1 rounded-lg border border-border bg-background/60 p-3">
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-muted">{label}</span>
-        {badge === "fact" ? <FactBadge /> : <EstimateBadge />}
+        {badge === "fact" ? <FactBadge text={factLabel} /> : <EstimateBadge />}
       </div>
       <span className="text-lg font-semibold text-foreground tabular-nums">{value}</span>
       {note ? <p className="text-[11px] leading-snug text-muted">{note}</p> : null}

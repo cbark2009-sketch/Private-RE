@@ -39,6 +39,32 @@ model Listing {
   @@index([zipCode])
 }
 
+// One tax deed sale on a specific date in a specific county, from that
+// county's RealTaxDeed site (src/lib/taxDeeds.ts) - the tax deed side's
+// counterpart to Listing, kept in its own table because the sale is a
+// different legal process with different numbers: an opening bid (unpaid
+// taxes + interest + costs) instead of a final judgment, and a tax deed
+// application number in place of a court case number. Same unique-key
+// reasoning as Listing: a sale can be rescheduled to a new date.
+model TaxDeedListing {
+  id                String   @id @default(cuid())
+  countySlug        String
+  auctionDate       DateTime
+  caseNumber        String
+  caseDetailUrl     String?
+  certificateNumber String?
+  openingBid        Float?
+  propertyAddress   String?
+  zipCode           String?
+  assessedValue     Float?
+  parcelId          String?
+  parcelUrl         String?
+  scrapedAt         DateTime @default(now())
+
+  @@unique([countySlug, caseNumber, auctionDate])
+  @@index([countySlug, auctionDate])
+}
+
 // Cached month-calendar day counts (src/lib/scrapeCalendar.ts), one row per
 // (county, year, month). Short-lived cache (a few hours) since the "active"
 // count for TODAY specifically decreases throughout the day as auctions

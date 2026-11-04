@@ -22,15 +22,23 @@ const ADDRESSES_PER_REQUEST = 100;
  * Census geocoder. Give it a `key` that changes per search so a new set of
  * results starts fresh instead of keeping the previous search's state.
  */
+const FORECLOSURE_LEGEND = [
+  { color: DOT_COLORS.foreclosure, label: "Foreclosure" },
+  { color: DOT_COLORS.hoa, label: "Likely HOA/lien case" },
+];
+
 export function AuctionMap({
   points,
   caption,
   heightClassName = "h-[420px] lg:h-[calc(100vh-9rem)] lg:min-h-[520px]",
+  legend = FORECLOSURE_LEGEND,
 }: {
   points: MapPoint[];
   caption: string;
   /** The homepage's default fills the column beside the search form; full-width pages pass something shorter. */
   heightClassName?: string;
+  /** What the dot colors mean - the foreclosure colors unless a page says otherwise. */
+  legend?: { color: string; label: string }[];
 }) {
   const pending = useMemo(
     () => [...new Set(points.filter((p) => !p.coords && !p.unlocatable).map((p) => p.address))],
@@ -98,14 +106,12 @@ export function AuctionMap({
         </div>
 
         <div className="pointer-events-none absolute bottom-3 left-3 z-[1000] flex flex-col gap-1 rounded-md bg-surface/95 px-2.5 py-2 text-[11px] text-foreground shadow">
-          <span className="flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-full" style={{ background: DOT_COLORS.foreclosure }} />
-            Foreclosure
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-full" style={{ background: DOT_COLORS.hoa }} />
-            Likely HOA/lien case
-          </span>
+          {legend.map((item) => (
+            <span key={item.label} className="flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-full" style={{ background: item.color }} />
+              {item.label}
+            </span>
+          ))}
         </div>
       </div>
 

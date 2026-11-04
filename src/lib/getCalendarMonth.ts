@@ -12,19 +12,33 @@ export async function getCalendarMonth(
 ): Promise<DayCount[]> {
   const county = getCounty(countySlug);
   if (!county) throw new Error(`Unsupported county: ${countySlug}`);
+  return getCalendarMonthForHost(countySlug, county.host, year, month);
+}
 
+/**
+ * The cached month calendar for any RealForeclose/RealTaxDeed host - both
+ * platforms serve the identical calendar page. `cacheKey` is what the month
+ * is cached under: the county slug for foreclosures, taxDeedKey(slug) for
+ * tax deeds, so the same county's two calendars don't overwrite each other.
+ */
+export async function getCalendarMonthForHost(
+  cacheKey: string,
+  host: string,
+  year: number,
+  month: number
+): Promise<DayCount[]> {
   const cached = await prisma.calendarCache.findUnique({
-    where: { countySlug_year_month: { countySlug, year, month } },
+    where: { countySlug_year_month: { countySlug: cacheKey, year, month } },
   });
   if (cached && Date.now() - cached.fetchedAt.getTime() < CACHE_MAX_AGE_MS) {
     return JSON.parse(cached.data) as DayCount[];
   }
 
-  const days = await scrapeCalendarMonth(county.host, year, month);
+  const days = await scrapeCalendarMonth(host, year, month);
 
   await prisma.calendarCache.upsert({
-    where: { countySlug_year_month: { countySlug, year, month } },
-    create: { countySlug, year, month, data: JSON.stringify(days) },
+    where: { countySlug_year_month: { countySlug: cacheKey, year, month } },
+    create: { countySlug: cacheKey, year, month, data: JSON.stringify(days) },
     update: { data: JSON.stringify(days), fetchedAt: new Date() },
   });
 

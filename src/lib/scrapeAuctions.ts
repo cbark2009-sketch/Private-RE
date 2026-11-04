@@ -147,85 +147,144 @@ async function fetchWaitingAreaHtml(host: string, auctionDateMMDDYYYY: string): 
   return combined;
 }
 
+/** A tax deed sale's listing - same platform template as a foreclosure, but an opening bid instead of a judgment. */
+export interface RawTaxDeed {
+  caseNumber: string; // the tax deed application number, e.g. "2024-14806"
+  caseDetailUrl: string | null;
+  certificateNumber: string | null; // often left blank by the county
+  /** Unpaid taxes + interest + costs (plus half the assessed value for homestead property) - the minimum bid. */
+  openingBid: number | null;
+  parcelId: string | null;
+  parcelUrl: string | null;
+  propertyAddress: string | null;
+  zipCode: string | null;
+  assessedValue: number | null;
+}
+
+type CommonFields = Pick<
+  RawListing,
+  "caseNumber" | "caseDetailUrl" | "parcelId" | "parcelUrl" | "propertyAddress" | "zipCode" | "assessedValue"
+>;
+
+function splitItems(retHTML: string): string[] {
+  return retHTML.split(/(?=<div id="AITEM_)/).filter((c) => c.includes("AITEM_"));
+}
+
+/** "FORECLOSURE", "TAXDEED"... or undefined when the county's template doesn't show an Auction Type at all. */
+function auctionType(chunk: string): string | undefined {
+  return chunk.match(/Auction Type:[\s\S]{0,60}?AD_DTA">([^<@]+)/)?.[1]?.trim().toUpperCase();
+}
+
 /**
  * The retHTML blob isn't valid HTML (it's templated with `@A`/`@B`/`@C`
  * placeholder tokens that client-side JS expands), so we pull fields out
  * with targeted regexes anchored on the human-readable labels rather than
- * trying to parse it as a DOM tree.
+ * trying to parse it as a DOM tree. These are the fields foreclosure and
+ * tax deed items share (same template, verified on Orange's tax deed site
+ * 2026-11-03).
  */
-function parseListings(retHTML: string): RawListing[] {
-  const chunks = retHTML.split(/(?=<div id="AITEM_)/).filter((c) => c.includes("AITEM_"));
+function parseCommonFields(chunk: string): CommonFields {
+  // Most counties (e.g. Orange) hyperlink the case number itself to a
+  // case detail page. Some (e.g. Miami-Dade, which instead links the
+  // Parcel ID to its own property search) render the case number as
+  // plain text with no link at all. Try the linked form first since it
+  // also gives us caseDetailUrl; fall back to the same delimiter-agnostic
+  // plain-text extraction already used for address parsing below rather
+  // than falling through to "UNKNOWN" - a missing match here isn't just
+  // a blank field, it silently collides every listing on the same
+  // Prisma unique key (countySlug+caseNumber+auctionDate) and drops all
+  // but one via upsert.
+  const linkedCaseMatch = chunk.match(/Case #:[\s\S]{0,80}?<a href="([^"]+)"[^>]*>([^<]+)<\/a>/);
+  const plainCaseMatch = chunk.match(/Case #:[\s\S]{0,80}?AD_DTA">([^<@]+)/);
+  const parcelMatch = chunk.match(/Parcel ID:[\s\S]{0,200}?<a href="([^"]*)"[^>]*>([^<]+)<\/a>/);
+  const assessedMatch = chunk.match(/Assessed Value:[\s\S]{0,120}?(\$[\d,]+\.\d{2})/);
+  // Different counties use different delimiter tokens after each value
+  // (Orange uses "@B", Duval uses "@G", etc. - same underlying platform,
+  // different per-tenant template), so we rely on the `[^<@]+` capture
+  // itself to stop at the next tag or token rather than requiring a
+  // specific one.
+  const addressMatch = chunk.match(/Property Address:[\s\S]{0,80}?AD_DTA">([^<@]+)[\s\S]{0,80}?AD_DTA">([^<@]+)/);
+  const streetLine = addressMatch ? insertMissingHouseNumberSpace(addressMatch[1].trim()) : null;
 
-  return chunks
+  const parcelText = parcelMatch?.[2]?.trim() ?? null;
+  // The site uses the parcel link text as a fallback label ("Property
+  // Appraiser", "TIMESHARE") when there's no real parcel number - only
+  // keep it if it actually looks like a parcel ID (digits, dashes).
+  const parcelId = parcelText && /^[\d-]+$/.test(parcelText) ? parcelText : null;
+
+  // Second address line is "CITY, ZIP" (Orange) or "CITY, FL- ZIP" (Duval)
+  // or similar - pull out the 5-digit zip regardless of what's around it.
+  const zipCode = addressMatch?.[2]?.match(/\d{5}/)?.[0] ?? null;
+
+  return {
+    caseNumber: (linkedCaseMatch?.[2] ?? plainCaseMatch?.[1])?.trim() ?? "UNKNOWN",
+    caseDetailUrl: linkedCaseMatch?.[1] ?? null,
+    parcelId,
+    parcelUrl: parcelId ? parcelMatch?.[1] ?? null : null,
+    propertyAddress: addressMatch ? `${streetLine}, ${addressMatch[2].trim()}` : null,
+    zipCode,
+    assessedValue: parseMoney(assessedMatch?.[1]),
+  };
+}
+
+function parseListings(retHTML: string): RawListing[] {
+  return splitItems(retHTML)
     .filter((chunk) => {
       // Some counties' "Waiting" list mixes mortgage FORECLOSURE cases with
-      // TAXDEED sales (unpaid property tax certificates), which use entirely
-      // different fields (Certificate #, Opening Bid instead of Case #,
-      // Final Judgment Amount) - a different legal process this app isn't
-      // built to represent. Rather than silently show a tax deed case with
-      // broken/null foreclosure fields, skip it. Fail open if the "Auction
-      // Type" label is missing/unrecognized (some counties never show it and
-      // are foreclosure-only) rather than risk hiding real foreclosure data.
-      const typeMatch = chunk.match(/Auction Type:[\s\S]{0,60}?AD_DTA">([^<@]+)/);
-      const type = typeMatch?.[1]?.trim().toUpperCase();
+      // TAXDEED sales (unpaid property tax certificates) - those belong to
+      // the separate tax deed side (parseTaxDeeds below, fed from each
+      // county's RealTaxDeed site instead). Fail open if the "Auction Type"
+      // label is missing/unrecognized (some counties never show it and are
+      // foreclosure-only) rather than risk hiding real foreclosure data.
+      const type = auctionType(chunk);
       return !type || type.includes("FORECLOSURE");
     })
     .map((chunk): RawListing => {
-      // Most counties (e.g. Orange) hyperlink the case number itself to a
-      // case detail page. Some (e.g. Miami-Dade, which instead links the
-      // Parcel ID to its own property search) render the case number as
-      // plain text with no link at all. Try the linked form first since it
-      // also gives us caseDetailUrl; fall back to the same delimiter-agnostic
-      // plain-text extraction already used for address parsing below rather
-      // than falling through to "UNKNOWN" - a missing match here isn't just
-      // a blank field, it silently collides every listing on the same
-      // Prisma unique key (countySlug+caseNumber+auctionDate) and drops all
-      // but one via upsert.
-      const linkedCaseMatch = chunk.match(/Case #:[\s\S]{0,80}?<a href="([^"]+)"[^>]*>([^<]+)<\/a>/);
-      const plainCaseMatch = chunk.match(/Case #:[\s\S]{0,80}?AD_DTA">([^<@]+)/);
       const judgmentMatch = chunk.match(/Final Judgment Amount:[\s\S]{0,120}?(\$[\d,]+\.\d{2})/);
-      const parcelMatch = chunk.match(/Parcel ID:[\s\S]{0,200}?<a href="([^"]*)"[^>]*>([^<]+)<\/a>/);
-      const assessedMatch = chunk.match(/Assessed Value:[\s\S]{0,120}?(\$[\d,]+\.\d{2})/);
-      // Different counties use different delimiter tokens after each value
-      // (Orange uses "@B", Duval uses "@G", etc. - same underlying platform,
-      // different per-tenant template), so we rely on the `[^<@]+` capture
-      // itself to stop at the next tag or token rather than requiring a
-      // specific one.
-      const addressMatch = chunk.match(
-        /Property Address:[\s\S]{0,80}?AD_DTA">([^<@]+)[\s\S]{0,80}?AD_DTA">([^<@]+)/
-      );
-      const streetLine = addressMatch ? insertMissingHouseNumberSpace(addressMatch[1].trim()) : null;
       const maxBidMatch = chunk.match(/Plaintiff Max Bid:[\s\S]{0,120}?(\$[\d,]+\.\d{2})/);
-
-      const parcelText = parcelMatch?.[2]?.trim() ?? null;
-      // The site uses the parcel link text as a fallback label ("Property
-      // Appraiser", "TIMESHARE") when there's no real parcel number - only
-      // keep it if it actually looks like a parcel ID (digits, dashes).
-      const parcelId = parcelText && /^[\d-]+$/.test(parcelText) ? parcelText : null;
-
-      // Second address line is "CITY, ZIP" (Orange) or "CITY, FL- ZIP" (Duval)
-      // or similar - pull out the 5-digit zip regardless of what's around it.
-      const zipCode = addressMatch?.[2]?.match(/\d{5}/)?.[0] ?? null;
-
       return {
-        caseNumber: (linkedCaseMatch?.[2] ?? plainCaseMatch?.[1])?.trim() ?? "UNKNOWN",
-        caseDetailUrl: linkedCaseMatch?.[1] ?? null,
+        ...parseCommonFields(chunk),
         finalJudgmentAmount: parseMoney(judgmentMatch?.[1]),
-        parcelId,
-        parcelUrl: parcelId ? parcelMatch?.[1] ?? null : null,
-        propertyAddress: addressMatch ? `${streetLine}, ${addressMatch[2].trim()}` : null,
-        zipCode,
-        assessedValue: parseMoney(assessedMatch?.[1]),
         plaintiffMaxBid: parseMoney(maxBidMatch?.[1]),
       };
     });
 }
 
-/** auctionDate as "YYYY-MM-DD"; returns the parsed upcoming listings for that date on the given county's site. */
+function parseTaxDeeds(retHTML: string): RawTaxDeed[] {
+  return splitItems(retHTML)
+    .filter((chunk) => {
+      // Miami-Dade's RealTaxDeed site also lists its foreclosures - those
+      // come from its RealForeclose site instead. Fail open on a missing
+      // type label, same as parseListings, since this is a tax deed site.
+      const type = auctionType(chunk);
+      return !type || type.includes("TAXDEED") || type.includes("TAX DEED");
+    })
+    .map((chunk): RawTaxDeed => {
+      const openingBidMatch = chunk.match(/Opening Bid:[\s\S]{0,120}?(\$[\d,]+\.\d{2})/);
+      const certificate = chunk.match(/Certificate #:[\s\S]{0,80}?AD_DTA">([^<@]*)/)?.[1]?.trim();
+      return {
+        ...parseCommonFields(chunk),
+        certificateNumber: certificate ? certificate : null,
+        openingBid: parseMoney(openingBidMatch?.[1]),
+      };
+    });
+}
+
+function toMMDDYYYY(isoDate: string): string {
+  const [y, m, d] = isoDate.split("-");
+  return `${m}/${d}/${y}`;
+}
+
+/** auctionDate as "YYYY-MM-DD"; returns the parsed upcoming foreclosure listings for that date on the given county's RealForeclose site. */
 export async function scrapeAuctionDate(host: string, auctionDate: string): Promise<RawListing[]> {
-  const [y, m, d] = auctionDate.split("-");
-  const mmddyyyy = `${m}/${d}/${y}`;
-  const retHTML = await fetchWaitingAreaHtml(host, mmddyyyy);
+  const retHTML = await fetchWaitingAreaHtml(host, toMMDDYYYY(auctionDate));
   if (!retHTML.includes("AITEM_")) return [];
   return parseListings(retHTML);
+}
+
+/** Same as scrapeAuctionDate, for a county's RealTaxDeed site - the identical two-request flow, just tax deed items. */
+export async function scrapeTaxDeedDate(host: string, auctionDate: string): Promise<RawTaxDeed[]> {
+  const retHTML = await fetchWaitingAreaHtml(host, toMMDDYYYY(auctionDate));
+  if (!retHTML.includes("AITEM_")) return [];
+  return parseTaxDeeds(retHTML);
 }

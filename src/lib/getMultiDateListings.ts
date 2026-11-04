@@ -21,14 +21,25 @@ export const DEFAULT_RANGE_DAYS = 60;
 // a URL with a multi-year range.
 const MAX_MONTHS_TO_SCAN = 14;
 
-/** Every active date for a county within [fromDate, toDate] (both YYYY-MM-DD, inclusive). */
-export async function getActiveDatesInRange(countySlug: string, fromDate: string, toDate: string): Promise<string[]> {
+/**
+ * Every active date for a county within [fromDate, toDate] (both YYYY-MM-DD,
+ * inclusive). Reads the county's foreclosure calendar unless
+ * `activeDatesInMonth` says otherwise - the tax deed side passes its own
+ * (src/lib/taxDeeds.ts) to walk the county's RealTaxDeed calendar instead.
+ */
+export async function getActiveDatesInRange(
+  countySlug: string,
+  fromDate: string,
+  toDate: string,
+  activeDatesInMonth: (year: number, month: number) => Promise<string[]> = (year, month) =>
+    getActiveDatesInMonth(countySlug, year, month)
+): Promise<string[]> {
   const dates: string[] = [];
   let [year, month] = fromDate.split("-").map(Number);
   const [toYear, toMonth] = toDate.split("-").map(Number);
 
   for (let i = 0; i < MAX_MONTHS_TO_SCAN && (year < toYear || (year === toYear && month <= toMonth)); i++) {
-    const found = await getActiveDatesInMonth(countySlug, year, month).catch((err) => {
+    const found = await activeDatesInMonth(year, month).catch((err) => {
       console.error(`Failed to resolve active dates for ${countySlug} ${year}-${month}:`, err);
       return [];
     });

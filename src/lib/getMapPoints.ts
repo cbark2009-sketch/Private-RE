@@ -23,6 +23,10 @@ export interface MapPoint {
   unlocatable: boolean;
   /** The county's land-use label ("Office building (one story)") when known - shown on the Commercial page's dots. */
   propertyType?: string | null;
+  /** Where clicking the dot goes - defaults to the foreclosure property page; tax deed dots go to theirs. */
+  href?: string;
+  /** What `judgment` is on this dot's hover preview - "Final judgment" unless set (tax deeds: "Opening bid"). */
+  amountLabel?: string;
 }
 
 // Safety cap on how many dots the default map pulls - well past what the
@@ -113,7 +117,8 @@ export async function listingsToMapPoints(listings: AuctionListingView[]): Promi
   return attachCoordinates(points);
 }
 
-async function attachCoordinates(points: Omit<MapPoint, "coords" | "unlocatable">[]): Promise<MapPoint[]> {
+/** Fills in each point's cached map location - exported for the tax deed side, which builds its own points. */
+export async function attachCoordinates(points: Omit<MapPoint, "coords" | "unlocatable">[]): Promise<MapPoint[]> {
   const { found, unlocatable } = await getCachedCoordinates(points.map((p) => p.address));
   return points.map((p) => ({ ...p, coords: found.get(p.address) ?? null, unlocatable: unlocatable.has(p.address) }));
 }
