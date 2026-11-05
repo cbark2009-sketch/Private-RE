@@ -162,6 +162,25 @@ async function toViews(rows: TaxDeedRow[]): Promise<TaxDeedView[]> {
   });
 }
 
+function upcomingWhere() {
+  return {
+    auctionDate: { gte: new Date(toISODate(new Date())) },
+    propertyAddress: { not: null },
+    scrapedAt: { gte: new Date(Date.now() - DROPPED_AFTER_DAYS * 24 * 60 * 60 * 1000) },
+  };
+}
+
+/** How many properties getUpcomingTaxDeeds would return, without loading them - for the landing page's button. */
+export async function countUpcomingTaxDeeds(): Promise<number> {
+  await ensureTaxDeedTable();
+  const rows = await prisma.taxDeedListing.findMany({
+    where: upcomingWhere(),
+    select: { propertyAddress: true },
+    distinct: ["propertyAddress"],
+  });
+  return rows.length;
+}
+
 /**
  * Every upcoming, still-listed tax deed sale with an address, one per
  * property (nearest date), soonest first - what the Tax Deeds page shows
@@ -170,11 +189,7 @@ async function toViews(rows: TaxDeedRow[]): Promise<TaxDeedView[]> {
 export async function getUpcomingTaxDeeds(): Promise<TaxDeedView[]> {
   await ensureTaxDeedTable();
   const rows = await prisma.taxDeedListing.findMany({
-    where: {
-      auctionDate: { gte: new Date(toISODate(new Date())) },
-      propertyAddress: { not: null },
-      scrapedAt: { gte: new Date(Date.now() - DROPPED_AFTER_DAYS * 24 * 60 * 60 * 1000) },
-    },
+    where: upcomingWhere(),
     orderBy: { auctionDate: "asc" },
     take: MAX_UPCOMING,
   });

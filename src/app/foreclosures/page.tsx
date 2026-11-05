@@ -87,7 +87,7 @@ export default async function HomePage({
             time - not the whole state at once, which isn&rsquo;t realistic to do in a single search.
           </p>
 
-          <form method="GET" action="/" className="mt-4 flex flex-col gap-4 rounded-lg border border-border bg-surface p-4">
+          <form method="GET" action="/foreclosures" className="mt-4 flex flex-col gap-4 rounded-lg border border-border bg-surface p-4">
             <CountyPicker initialSelected={requestedSlugs} />
             <div>
               <label className="text-xs font-medium text-foreground">Zip code (optional)</label>

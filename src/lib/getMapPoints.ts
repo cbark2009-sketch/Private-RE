@@ -39,6 +39,24 @@ const MAX_UPCOMING_POINTS = 6000;
 // likely dropped off the county's calendar and shouldn't be a dot.
 const STALE_AFTER_DAYS = 4;
 
+function upcomingWhere() {
+  return {
+    auctionDate: { gte: new Date(toISODate(new Date())) },
+    propertyAddress: { not: null },
+    scrapedAt: { gte: new Date(Date.now() - STALE_AFTER_DAYS * 24 * 60 * 60 * 1000) },
+  };
+}
+
+/** How many properties getUpcomingRows would return, without loading them - for the landing page's button. */
+export async function countUpcomingProperties(): Promise<number> {
+  const rows = await prisma.listing.findMany({
+    where: upcomingWhere(),
+    select: { propertyAddress: true },
+    distinct: ["propertyAddress"],
+  });
+  return rows.length;
+}
+
 /**
  * Every upcoming, still-listed auction with an address, one per property
  * (a rescheduled case can leave more than one upcoming row for the same
@@ -48,11 +66,7 @@ const STALE_AFTER_DAYS = 4;
  */
 export async function getUpcomingRows() {
   const rows = await prisma.listing.findMany({
-    where: {
-      auctionDate: { gte: new Date(toISODate(new Date())) },
-      propertyAddress: { not: null },
-      scrapedAt: { gte: new Date(Date.now() - STALE_AFTER_DAYS * 24 * 60 * 60 * 1000) },
-    },
+    where: upcomingWhere(),
     orderBy: { auctionDate: "asc" },
     take: MAX_UPCOMING_POINTS,
   });

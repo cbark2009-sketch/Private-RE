@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import "./globals.css";
 import { ZipSearchBar } from "@/components/ZipSearchBar";
 import { CountySelect } from "@/components/CountySelect";
+import { LogoMark } from "@/components/Logo";
 import { prisma } from "@/lib/db";
 import { verifySessionToken, SESSION_COOKIE_NAME } from "@/lib/auth";
 
@@ -25,9 +26,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Auction Clarity — Florida Foreclosure Auctions, Plainly Explained",
+  title: "Auction Clarity — Florida Foreclosure & Tax Deed Auctions, Plainly Explained",
   description:
-    "Upcoming Florida foreclosure auction listings translated into plain English, with rough value estimates.",
+    "Upcoming Florida foreclosure and tax deed auction listings translated into plain English, with rough value estimates.",
 };
 
 export default async function RootLayout({
@@ -47,12 +48,13 @@ export default async function RootLayout({
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <header className="border-b border-border bg-gradient-to-r from-navy to-navy-light text-white">
           <div className="mx-auto max-w-6xl px-4 py-4 sm:px-6 flex flex-wrap items-center justify-between gap-4">
-            <a href="/" className="flex items-baseline gap-2">
+            <a href="/" className="flex items-center gap-2">
+              <LogoMark className="h-7 w-7" />
               <span className="text-lg font-semibold tracking-tight">
                 Auction Clarity
               </span>
               <span className="hidden sm:inline text-sm text-white/60">
-                Florida foreclosure auctions, plainly explained
+                Florida foreclosure &amp; tax deed auctions, plainly explained
               </span>
             </a>
             <div className="flex flex-wrap items-center gap-3">
@@ -67,14 +69,17 @@ export default async function RootLayout({
               </div>
               {currentUser ? (
                 <>
-                  <a href="/favorites" className="text-xs text-white/60 hover:text-white hover:underline">
-                    ★ Favorites
+                  <a href="/foreclosures" className="text-xs text-white/60 hover:text-white hover:underline">
+                    Foreclosures
+                  </a>
+                  <a href="/tax-deeds" className="text-xs text-white/60 hover:text-white hover:underline">
+                    Tax Deeds
                   </a>
                   <a href="/commercial" className="text-xs text-white/60 hover:text-white hover:underline">
                     Commercial
                   </a>
-                  <a href="/tax-deeds" className="text-xs text-white/60 hover:text-white hover:underline">
-                    Tax Deeds
+                  <a href="/favorites" className="text-xs text-white/60 hover:text-white hover:underline">
+                    ★ Favorites
                   </a>
                   {currentUser.isOwner ? (
                     <a href="/ceo" className="text-xs text-white/60 hover:text-white hover:underline">
