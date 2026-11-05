@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { ensureTable } from "@/lib/ensureTable";
+import { getParcelCentroids, parcelKey } from "@/lib/floridaParcel";
 
 // Address -> map coordinates via the US Census Bureau's free geocoder
 // (geocoding.geo.census.gov) - no API key, no quota, and public-domain
@@ -10,8 +11,11 @@ import { ensureTable } from "@/lib/ensureTable";
 //
 // Not every address matches - Census's address database misses some newer
 // streets and subdivisions (about 7 of 99 in the first real Orange/Seminole
-// test) - so callers have to expect some listings to stay off the map.
-// Unit numbers ("# 34", "UNIT 12") are fine; Census ignores them itself.
+// test), and has nothing to go on for vacant lots listed by street name
+// alone (about 40% of tax deed sales). Those fall back to the center of the
+// property's parcel from the state tax roll (placeByParcel below), which
+// still leaves a few off the map. Unit numbers ("# 34", "UNIT 12") are
+// fine; Census ignores them itself.
 
 const BATCH_URL = "https://geocoding.geo.census.gov/geocoder/locations/addressbatch";
 const FAILURE_RETRY_AFTER_DAYS = 30;
@@ -54,7 +58,10 @@ export async function getCachedCoordinates(addresses: string[]): Promise<CachedC
     for (const row of rows) {
       if (!row.failed && row.lat != null && row.lng != null) {
         found.set(row.address, { lat: row.lat, lng: row.lng });
-      } else if (Date.now() - row.fetchedAt.getTime() < FAILURE_RETRY_AFTER_DAYS * 24 * 60 * 60 * 1000) {
+      } else if (
+        row.fetchedAt.getTime() >= PARCEL_FALLBACK_ADDED &&
+        Date.now() - row.fetchedAt.getTime() < FAILURE_RETRY_AFTER_DAYS * 24 * 60 * 60 * 1000
+      ) {
         unlocatable.add(row.address);
       }
     }
@@ -62,11 +69,51 @@ export async function getCachedCoordinates(addresses: string[]): Promise<CachedC
   return { found, unlocatable };
 }
 
+// Failures recorded before the parcel fallback below existed only ever got a
+// Census attempt, so they're retried once (as if never cached) instead of
+// waiting out the usual 30 days - most are vacant lots the fallback can
+// place. Set a few days past the release so a slow deploy can't miss any.
+const PARCEL_FALLBACK_ADDED = Date.parse("2026-11-08T00:00:00Z");
+
 /**
- * Returns coordinates for every address (null = Census couldn't match it),
- * using the cache first and one Census batch request for the rest. Throws
- * if Census itself is unreachable - that's transient, so it isn't cached as
- * a failure.
+ * For addresses Census couldn't match, the center of the property's own
+ * parcel instead (see getParcelCentroids in floridaParcel.ts), using the
+ * parcel ID the county site listed for it - foreclosure or tax deed.
+ */
+async function placeByParcel(addresses: string[]): Promise<Map<string, Coordinates>> {
+  if (addresses.length === 0) return new Map();
+  const [listings, taxDeeds] = await Promise.all([
+    prisma.listing.findMany({
+      where: { propertyAddress: { in: addresses }, parcelId: { not: null } },
+      select: { propertyAddress: true, parcelId: true, countySlug: true },
+    }),
+    prisma.taxDeedListing
+      .findMany({
+        where: { propertyAddress: { in: addresses }, parcelId: { not: null } },
+        select: { propertyAddress: true, parcelId: true, countySlug: true },
+      })
+      .catch(() => []), // table not created yet on a fresh database
+  ]);
+  const parcelByAddress = new Map<string, { countySlug: string; parcelId: string }>();
+  for (const r of [...listings, ...taxDeeds]) {
+    if (!parcelByAddress.has(r.propertyAddress!)) {
+      parcelByAddress.set(r.propertyAddress!, { countySlug: r.countySlug, parcelId: r.parcelId! });
+    }
+  }
+  const centroids = await getParcelCentroids([...parcelByAddress.values()]);
+  const placed = new Map<string, Coordinates>();
+  for (const [address, p] of parcelByAddress) {
+    const c = centroids.get(parcelKey(p.countySlug, p.parcelId));
+    if (c) placed.set(address, c);
+  }
+  return placed;
+}
+
+/**
+ * Returns coordinates for every address (null = couldn't be placed), using
+ * the cache first, then one Census batch request, then the parcel fallback
+ * for whatever Census couldn't match. Throws if Census itself is
+ * unreachable - that's transient, so it isn't cached as a failure.
  */
 export async function geocodeAddresses(addresses: string[]): Promise<Map<string, Coordinates | null>> {
   const { found, unlocatable } = await getCachedCoordinates(addresses);
@@ -77,6 +124,12 @@ export async function geocodeAddresses(addresses: string[]): Promise<Map<string,
   if (toFetch.length === 0) return results;
 
   const matched = await censusBatch(toFetch);
+  const byParcel = await placeByParcel(toFetch.filter((a) => !matched.has(a))).catch((err) => {
+    console.error("Parcel placement failed:", err);
+    return new Map<string, Coordinates>();
+  });
+  for (const [address, c] of byParcel) matched.set(address, c);
+
   for (const address of toFetch) {
     const coords = matched.get(address) ?? null;
     results.set(address, coords);

@@ -197,6 +197,9 @@ function parseCommonFields(chunk: string): CommonFields {
   const linkedCaseMatch = chunk.match(/Case #:[\s\S]{0,80}?<a href="([^"]+)"[^>]*>([^<]+)<\/a>/);
   const plainCaseMatch = chunk.match(/Case #:[\s\S]{0,80}?AD_DTA">([^<@]+)/);
   const parcelMatch = chunk.match(/Parcel ID:[\s\S]{0,200}?<a href="([^"]*)"[^>]*>([^<]+)<\/a>/);
+  // Some counties (e.g. Highlands' tax deed site) show the parcel ID as
+  // plain text with no link at all.
+  const plainParcelMatch = chunk.match(/Parcel ID:[\s\S]{0,80}?AD_DTA">([^<@]+)/);
   const assessedMatch = chunk.match(/Assessed Value:[\s\S]{0,120}?(\$[\d,]+\.\d{2})/);
   // Different counties use different delimiter tokens after each value
   // (Orange uses "@B", Duval uses "@G", etc. - same underlying platform,
@@ -206,11 +209,13 @@ function parseCommonFields(chunk: string): CommonFields {
   const addressMatch = chunk.match(/Property Address:[\s\S]{0,80}?AD_DTA">([^<@]+)[\s\S]{0,80}?AD_DTA">([^<@]+)/);
   const streetLine = addressMatch ? insertMissingHouseNumberSpace(addressMatch[1].trim()) : null;
 
-  const parcelText = parcelMatch?.[2]?.trim() ?? null;
+  const parcelText = (parcelMatch?.[2] ?? plainParcelMatch?.[1])?.trim() ?? null;
   // The site uses the parcel link text as a fallback label ("Property
   // Appraiser", "TIMESHARE") when there's no real parcel number - only
-  // keep it if it actually looks like a parcel ID (digits, dashes).
-  const parcelId = parcelText && /^[\d-]+$/.test(parcelText) ? parcelText : null;
+  // keep it if it actually looks like a parcel ID: letters, digits and
+  // dashes with at least one digit (Highlands prefixes a letter:
+  // "C-35-34-28-021-0130-0080").
+  const parcelId = parcelText && /^[A-Za-z0-9-]+$/.test(parcelText) && /\d/.test(parcelText) ? parcelText : null;
 
   // Second address line is "CITY, ZIP" (Orange) or "CITY, FL- ZIP" (Duval)
   // or similar - pull out the 5-digit zip regardless of what's around it.
@@ -220,7 +225,7 @@ function parseCommonFields(chunk: string): CommonFields {
     caseNumber: (linkedCaseMatch?.[2] ?? plainCaseMatch?.[1])?.trim() ?? "UNKNOWN",
     caseDetailUrl: linkedCaseMatch?.[1] ?? null,
     parcelId,
-    parcelUrl: parcelId ? parcelMatch?.[1] ?? null : null,
+    parcelUrl: parcelId && parcelMatch ? parcelMatch[1] : null,
     propertyAddress: addressMatch ? `${streetLine}, ${addressMatch[2].trim()}` : null,
     zipCode,
     assessedValue: parseMoney(assessedMatch?.[1]),

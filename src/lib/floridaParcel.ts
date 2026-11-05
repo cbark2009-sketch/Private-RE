@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { ensureTable } from "@/lib/ensureTable";
 import type { Coordinates } from "@/lib/geocode";
 import { parseStreet, sameStreet } from "@/lib/addressMatch";
+import { countyNameToSlug } from "@/lib/counties";
 
 // A house's own record from Florida's property tax roll: every county
 // property appraiser sends the Department of Revenue a yearly file for every
@@ -300,6 +301,103 @@ export async function getFloridaParcel(
     update: { data, failed: !record, fetchedAt: new Date() },
   });
   return record;
+}
+
+// Florida DOR county numbers (the roll's CO_NO): alphabetical from 11, with
+// Miami-Dade filed under "Dade" and the two "St." counties after Putnam -
+// confirmed against the service 2026-11-04 for every county that matched
+// (Bay 13, Miami-Dade 23, Leon 47, Marion 52, Orange 58 ... Washington 77).
+const DOR_COUNTY_ORDER = [
+  "Alachua", "Baker", "Bay", "Bradford", "Brevard", "Broward", "Calhoun", "Charlotte", "Citrus", "Clay",
+  "Collier", "Columbia", "Miami-Dade", "DeSoto", "Dixie", "Duval", "Escambia", "Flagler", "Franklin", "Gadsden",
+  "Gilchrist", "Glades", "Gulf", "Hamilton", "Hardee", "Hendry", "Hernando", "Highlands", "Hillsborough", "Holmes",
+  "Indian River", "Jackson", "Jefferson", "Lafayette", "Lake", "Lee", "Leon", "Levy", "Liberty", "Madison",
+  "Manatee", "Marion", "Martin", "Monroe", "Nassau", "Okaloosa", "Okeechobee", "Orange", "Osceola", "Palm Beach",
+  "Pasco", "Pinellas", "Polk", "Putnam", "Saint Johns", "Saint Lucie", "Santa Rosa", "Sarasota", "Seminole", "Sumter",
+  "Suwannee", "Taylor", "Union", "Volusia", "Wakulla", "Walton", "Washington",
+];
+const DOR_COUNTY_NUMBER = new Map(DOR_COUNTY_ORDER.map((name, i) => [countyNameToSlug(name), i + 11]));
+const CENTROID_IDS_PER_QUERY = 25;
+
+/** Key for getParcelCentroids' result map. */
+export function parcelKey(countySlug: string, parcelId: string): string {
+  return `${countySlug}|${parcelId}`;
+}
+
+/**
+ * The center of each parcel, from the state roll's own parcel shapes - for
+ * placing a property on the map when its address can't be geocoded. That's
+ * mostly vacant lots listed by street name alone ("HWY 231, FOUNTAIN"),
+ * which Census has nothing to match on, but which still have a parcel ID.
+ * A parcel's center is inside the lot, so it's actually a better pin than a
+ * street-side geocode.
+ *
+ * Parcel IDs repeat across counties (Bay's "01601-000-000" also exists in
+ * Bradford), so every lookup is limited to the listing's own county. The
+ * county sites show IDs either exactly as the state stores them or with
+ * dashes the state strips, so both forms are tried. A few counties (Clay,
+ * Hillsborough, Lake, Pinellas) write IDs in a different order entirely and
+ * simply don't match - better unplaced than guessed.
+ */
+export async function getParcelCentroids(
+  parcels: { countySlug: string; parcelId: string }[]
+): Promise<Map<string, Coordinates>> {
+  const results = new Map<string, Coordinates>();
+  const byCounty = new Map<number, { countySlug: string; parcelId: string }[]>();
+  for (const p of parcels) {
+    const coNo = DOR_COUNTY_NUMBER.get(p.countySlug);
+    // Only letters/digits/dashes ever go into the query.
+    if (!coNo || !/^[A-Za-z0-9-]+$/.test(p.parcelId)) continue;
+    byCounty.set(coNo, [...(byCounty.get(coNo) ?? []), p]);
+  }
+
+  const queries: Promise<void>[] = [];
+  for (const [coNo, group] of byCounty) {
+    for (let i = 0; i < group.length; i += CENTROID_IDS_PER_QUERY) {
+      const chunk = group.slice(i, i + CENTROID_IDS_PER_QUERY);
+      // State ID as it comes back -> the listing it belongs to.
+      const wanted = new Map<string, { countySlug: string; parcelId: string }>();
+      for (const p of chunk) {
+        wanted.set(p.parcelId, p);
+        wanted.set(p.parcelId.replace(/-/g, ""), p);
+      }
+      queries.push(
+        (async () => {
+          const qs = new URLSearchParams({
+            where: `CO_NO = ${coNo} AND PARCEL_ID IN (${[...wanted.keys()].map((id) => `'${id}'`).join(",")})`,
+            outFields: "PARCEL_ID",
+            returnGeometry: "false",
+            returnCentroid: "true",
+            outSR: "4326",
+            f: "json",
+          });
+          // POST, not GET: a batch of long IDs (Highlands' run ~25 characters,
+          // each sent two ways) makes the URL long enough that the service
+          // answers a GET with a 404.
+          const res = await fetch(SERVICE_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: qs,
+            signal: AbortSignal.timeout(30_000),
+          });
+          if (!res.ok) throw new Error(`Parcel centroid request failed: ${res.status}`);
+          const body = (await res.json()) as {
+            features?: { attributes: { PARCEL_ID?: string }; centroid?: { x: number; y: number } }[];
+            error?: { message?: string };
+          };
+          if (body.error) throw new Error(`Parcel centroid error: ${body.error.message ?? JSON.stringify(body.error)}`);
+          for (const f of body.features ?? []) {
+            const listing = f.attributes.PARCEL_ID ? wanted.get(f.attributes.PARCEL_ID) : undefined;
+            if (listing && f.centroid && Number.isFinite(f.centroid.x) && Number.isFinite(f.centroid.y)) {
+              results.set(parcelKey(listing.countySlug, listing.parcelId), { lat: f.centroid.y, lng: f.centroid.x });
+            }
+          }
+        })().catch((err) => console.error(`Parcel centroids for county ${coNo} failed:`, err))
+      );
+    }
+  }
+  await Promise.all(queries);
+  return results;
 }
 
 // SQLite caps how many values one `IN (...)` query can bind.

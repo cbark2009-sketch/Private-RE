@@ -257,6 +257,10 @@ async function refreshAuctionDate(county: County, auctionDate: string) {
         estimatedMaxBid: estimateMaxBid(listing.finalJudgmentAmount),
         assessedValueAtSale: listing.assessedValue,
         zipCode: listing.zipCode,
+        // Fills in parcel IDs the parser learned to read later (plain-text
+        // ones, 2026-11-04) - `undefined` leaves an already-stored one alone.
+        parcelId: listing.parcelId ?? undefined,
+        parcelUrl: listing.parcelUrl ?? undefined,
         scrapedAt: new Date(),
       },
     });
